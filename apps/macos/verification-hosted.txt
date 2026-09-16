@@ -1,0 +1,10 @@
+PASS Historical hosted macOS API smoke against the original Netlify origin, before the custom-domain migration
+PASS Login and authenticated state decoding
+PASS Conditional state refresh through Netlify 304 with HTTP Date fallback
+PASS Idempotent manual entry persistence
+PASS Timer start, elapsed persistence, stop, resume, stale-stop protection, and logout
+
+The smoke account and entries were removed after the check. Native companion-window UI was exercised locally; production GUI sign-in remains an operator step after downloading the ad hoc build.
+
+Canonical app origin: https://crops.wims.vc
+The historical smoke result above does not claim a native login/timer test on the new custom domain. Domain DNS/TLS/API verification is tracked by the deployment checks.

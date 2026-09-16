@@ -1,0 +1,23 @@
+PASS Authorized production origin
+PASS Native GUI signs in over production HTTPS
+PASS Signed into the isolated QA identity and team
+PASS Production session stored in Android Keystore
+PASS Native Start persists a hosted timer
+PASS Hosted entry keeps native task details
+PASS Hosted timer has a foreground service
+PASS Hosted timer crosses multiple successful polling cycles
+PASS Hosted elapsed time advances across proxy 304 responses
+PASS Hosted timer notification is visible
+PASS Hosted notification uses Android's live chronometer
+PASS Notification Stop synchronizes to production
+PASS Independent hosted state confirms timer stopped
+PASS Native Settings enables background cross-device sync
+PASS Background Android discovers a hosted remote timer
+PASS Hosted remote Stop synchronizes back to Android
+PASS Native app returns to foreground
+PASS Native GUI signs out and stops its foreground service
+PASS Production session removed from Keystore-backed storage
+PASS Hosted session is revoked after logout
+PASS Signed-out app retains the production origin
+
+OK (21 hosted checks)

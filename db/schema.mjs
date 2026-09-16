@@ -1,0 +1,73 @@
+// Shared PostgreSQL schema, bundled with the API for Netlify and PGlite.
+export const schema = `
+CREATE TABLE IF NOT EXISTS app_locks (id INTEGER PRIMARY KEY);
+INSERT INTO app_locks(id) VALUES(1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+  password_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS teams (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS memberships (
+  id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id),
+  user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL CHECK (role IN ('admin','member')),
+  UNIQUE(team_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS clients (
+  id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id), name TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '', archived BOOLEAN NOT NULL DEFAULT false,
+  UNIQUE(id,team_id)
+);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id), client_id TEXT,
+  name TEXT NOT NULL, code TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '#C56845',
+  billable BOOLEAN NOT NULL DEFAULT true, rate NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (rate >= 0),
+  budget_hours NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (budget_hours >= 0),
+  archived BOOLEAN NOT NULL DEFAULT false, UNIQUE(id,team_id),
+  FOREIGN KEY(client_id,team_id) REFERENCES clients(id,team_id)
+);
+CREATE TABLE IF NOT EXISTS entries (
+  id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id),
+  user_id TEXT NOT NULL REFERENCES users(id), project_id TEXT NOT NULL,
+  task TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', date DATE NOT NULL,
+  duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
+  started_at TIMESTAMPTZ, billable BOOLEAN NOT NULL DEFAULT true,
+  status TEXT NOT NULL DEFAULT 'unbilled' CHECK (status IN ('unbilled','invoiced','paid')),
+  version INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY(project_id,team_id) REFERENCES projects(id,team_id),
+  FOREIGN KEY(team_id,user_id) REFERENCES memberships(team_id,user_id),
+  CHECK (started_at IS NULL OR status = 'unbilled')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS entries_one_running_user ON entries(user_id) WHERE started_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS entries_team_date ON entries(team_id,date DESC);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+  expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS auth_limits (
+  key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS auth_limits_expiry ON auth_limits(reset_at);
+CREATE TABLE IF NOT EXISTS mutation_requests (
+  user_id TEXT NOT NULL REFERENCES users(id), request_key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL, response JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(user_id,request_key)
+);
+CREATE INDEX IF NOT EXISTS mutation_requests_expiry ON mutation_requests(created_at);
+
+-- Hosted PostgreSQL services may expose public-schema tables through a REST API.
+-- No direct client policies are granted. The Crops SQL table owner bypasses RLS
+-- and applies the team/role checks in server/api.mjs.
+ALTER TABLE app_locks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE auth_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mutation_requests ENABLE ROW LEVEL SECURITY;
+`;

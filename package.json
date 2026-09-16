@@ -1,0 +1,39 @@
+{
+  "name": "crops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Simple team time tracking. One timer, everywhere.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
+    "dev:web": "vite --host 0.0.0.0",
+    "dev:api": "node --env-file-if-exists=.env server/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "build:macos": "bash apps/macos/build.sh",
+    "build:android": "bash apps/android/build.sh",
+    "setup:owner": "node --env-file-if-exists=.env scripts/bootstrap-admin.mjs",
+    "setup:netlify": "node scripts/setup-netlify-owner.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@netlify/database": "^2.0.1",
+    "lucide-react": "^0.577.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

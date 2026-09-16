@@ -1,0 +1,6 @@
+PASS Installed the previously deployed version 1.0.0 APK
+PASS Installed version 1.0.1 directly over version 1.0.0 without clearing app data
+PASS Upgraded launch migrates the saved production URL and retains unrelated preferences
+PASS Upgrade clears stale team/cache and disables background sync
+PASS Actual native login field shows the editable canonical domain after upgrade
+OK (5 previous-package upgrade checks)

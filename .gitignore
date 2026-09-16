@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.data/
+.env
+.env.*
+!.env.example
+.DS_Store
+.netlify/
+apps/macos/.build/
+apps/android/.gradle/
+apps/android/**/build/
+apps/android/local.properties
+artifacts/
+playwright-report/
+test-results/
+# Local Harvest reference screenshots (not public project assets).
+/*.png

@@ -1,0 +1,12 @@
+PASS Fresh install uses the canonical production origin
+PASS Exact previous production origin migrates
+PASS Migration clears the old origin's credential
+PASS Migration clears old team and cached state
+PASS Migration disables stale background monitoring
+PASS Custom origin and session stay unchanged
+PASS Local origin and session stay unchanged
+PASS Migration matches only the exact previous origin
+PASS Canonical-origin sessions survive subsequent launches
+PASS Native signed-out URL field shows the editable canonical origin
+
+OK (10 migration checks)
