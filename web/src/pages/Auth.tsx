@@ -1,7 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowRight, Check, Clock3, Sprout } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { api } from "../api";
 import { Brand, Field } from "../components/UI";
+import { Pitch } from "../components/Pitch";
+// On phones the pitch sits above the form, so focusing a field would scroll past it.
+const stacked = () =>
+  typeof matchMedia === "function" && matchMedia("(max-width: 640px)").matches;
 export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   const [register, setRegister] = useState(false),
     [busy, setBusy] = useState(false),
@@ -36,28 +40,11 @@ export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   return (
     <div className="auth-layout">
       <section className="auth-story">
-        <Brand />
-        <div className="auth-message">
-          <div className="eyebrow">A little focus goes a long way.</div>
-          <h1>
-            Good work.
-            <br />
-            Room to grow.
-          </h1>
-          <p>
-            Simple time tracking for your team.
-            <br />
-            Every project. Every minute. Together.
-          </p>
-          <div className="auth-timer">
-            <Clock3 size={20} />
-            <span>Time well spent</span>
-            <Sprout size={20} />
-          </div>
+        <div className="auth-story-top">
+          <Brand />
+          <span>Web · macOS · Android</span>
         </div>
-        <div className="auth-bottom">
-          One timer. Everywhere.<span>Web · macOS · Android</span>
-        </div>
+        <Pitch />
       </section>
       <main className="auth-main">
         <div className="auth-form">
@@ -76,7 +63,7 @@ export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
                 <>
                   <Field label="Your name">
                     <input
-                      autoFocus
+                      autoFocus={!stacked()}
                       name="name"
                       autoComplete="name"
                       required
@@ -98,7 +85,7 @@ export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
                 <input
                   name="username"
                   autoComplete="username"
-                  autoFocus={!register}
+                  autoFocus={!register && !stacked()}
                   required
                   minLength={3}
                   maxLength={80}

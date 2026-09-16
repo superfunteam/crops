@@ -134,3 +134,29 @@ test("CDN-generated 304 responses keep the clock moving when custom headers are 
     Date.now = originalNow;
   }
 });
+test("Harvest pricing kit reproduces a real Harvest renewal", async () => {
+  const { harvestYearly, monthlyFee, STORY_SCENARIOS, LANDER_SCENARIOS } =
+    await import("../web/src/harvestPricing.ts");
+  const studio = harvestYearly(STORY_SCENARIOS[0]);
+  // Harvest billing page: $14 × 2 seats × 12 = $336, Flex usage $51 × 12 = $612.
+  assert.equal(studio.seats, 336);
+  assert.equal(studio.usage, 612);
+  assert.equal(monthlyFee("projects", 12), 0);
+  assert.equal(monthlyFee("projects", 13), 9);
+  assert.equal(monthlyFee("clients", 16), 42);
+  assert.equal(monthlyFee("invoiced", 1_000_001), 750);
+  assert.deepEqual(
+    LANDER_SCENARIOS.map((s) => [
+      harvestYearly(s).total,
+      harvestYearly(s, false).total,
+    ]),
+    [
+      [672, 432],
+      [6756, 2196],
+    ],
+  );
+  assert.deepEqual(
+    STORY_SCENARIOS.map((s) => harvestYearly(s).total),
+    [948, 5124, 22344],
+  );
+});
