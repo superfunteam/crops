@@ -197,7 +197,7 @@ export function createApi(options = {}) {
       const token = bearer || cookie;
       if (!token || token.length > 256) fail(401, 'unauthorized', 'Sign in to continue.');
       if (!bearer && cookie && ['POST', 'PATCH', 'DELETE'].includes(request.method) && !origin && request.headers.get('sec-fetch-site') !== 'same-origin') fail(403, 'origin_required', 'Cookie-authenticated changes require a verified same-origin browser request. Native clients should use a Bearer token.');
-      if (path === '/auth/password' && request.method === 'POST') {
+      if ((path === '/auth/password' || /^\/members\/[^/]+\/password$/.test(path)) && request.method === 'POST') {
         const session = await one(db, 'SELECT user_id FROM sessions WHERE token_hash=$1 AND expires_at>now()', [digest(token)]);
         await authThrottle(db, context.ip || 'unknown', `password:${session?.user_id || digest(token)}`);
       }
@@ -235,12 +235,13 @@ export function createApi(options = {}) {
           const teams = (await tx.query('SELECT t.id,t.name,m.role FROM teams t JOIN memberships m ON m.team_id=t.id WHERE m.user_id=$1 ORDER BY t.created_at,t.id', [user.id])).rows;
           const team = url.searchParams.has('teamId') ? teams.find((t) => t.id === url.searchParams.get('teamId')) : teams[0];
           if (!team) fail(403, 'team_access_denied', 'You do not have access to this team.');
-          const members = (await tx.query('SELECT m.*,u.name,u.username FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.team_id=$1 ORDER BY u.name,m.id', [team.id])).rows.map(memberJson);
+          const members = (await tx.query('SELECT m.*,u.name,u.username,(SELECT COUNT(*)::integer FROM memberships all_m WHERE all_m.user_id=m.user_id) AS team_count FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.team_id=$1 ORDER BY u.name,m.id', [team.id])).rows.map((m) => ({ ...memberJson(m), canManageAccount: team.role === 'admin' && m.team_count === 1 }));
+          const formerMembers = team.role === 'admin' ? (await tx.query('SELECT DISTINCT u.id,u.name,u.username FROM users u JOIN entries e ON e.user_id=u.id WHERE e.team_id=$1 AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.team_id=$1 AND m.user_id=u.id)', [team.id])).rows.map(publicUser) : [];
           const clients = (await tx.query('SELECT * FROM clients WHERE team_id=$1 ORDER BY name,id', [team.id])).rows.map(clientJson);
           const projects = (await tx.query('SELECT * FROM projects WHERE team_id=$1 ORDER BY name,id', [team.id])).rows.map(projectJson);
           const entries = (await tx.query(`SELECT * FROM entries WHERE team_id=$1${team.role === 'admin' ? '' : ' AND user_id=$2'} ORDER BY date DESC,created_at DESC,id`, team.role === 'admin' ? [team.id] : [team.id, user.id])).rows.map(entryJson);
           const runningEntry = entryJson(await one(tx, 'SELECT * FROM entries WHERE user_id=$1 AND started_at IS NOT NULL', [user.id]));
-          const snapshot = { user: publicUser(user), teams, team, members, clients, projects, entries, runningEntry };
+          const snapshot = { user: publicUser(user), teams, team, members, formerMembers, clients, projects, entries, runningEntry };
           // This compares application state, excluding the changing clock field,
           // so it is a semantic (weak) validator rather than a byte validator.
           const snapshotHash = digest(JSON.stringify(snapshot));
@@ -254,13 +255,24 @@ export function createApi(options = {}) {
           });
           return stateNotModified ? null : { ...snapshot, serverTime: stateServerTime };
         }
-        if (path === '/teams' && request.method === 'POST') return { team: await createTeam(tx, user.id, string(body.name, 'Team name', { min: 1, max: 100 })) };
+        if (path === '/teams' && request.method === 'POST') {
+          await tx.query('SELECT id FROM app_locks WHERE id=1 FOR UPDATE');
+          return { team: await createTeam(tx, user.id, string(body.name, 'Team name', { min: 1, max: 100 })) };
+        }
+        const teamMatch = path.match(/^\/teams\/([^/]+)$/);
+        if (teamMatch && request.method === 'PATCH') {
+          await tx.query('SELECT id FROM teams WHERE id=$1 FOR NO KEY UPDATE', [teamMatch[1]]);
+          await membership(tx, teamMatch[1], user.id, true);
+          if (Object.keys(body).some((key) => key !== 'name')) fail(400, 'invalid_input', 'Only the team name can be changed.');
+          return { team: await one(tx, 'UPDATE teams SET name=$1 WHERE id=$2 RETURNING id,name', [string(body.name, 'Team name', { min: 1, max: 100 }), teamMatch[1]]) };
+        }
         if (path === '/timer/start' && request.method === 'POST') {
           const teamId = string(body.teamId, 'Team ID', { min: 1, max: 80 });
           await membership(tx, teamId, user.id);
           // NO KEY UPDATE serializes timers while remaining compatible with the
           // FK KEY SHARE locks held by concurrent idempotency/session inserts.
           await tx.query('SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE', [user.id]);
+          await membership(tx, teamId, user.id); // Removal may have completed while this timer waited.
           let entry;
           if (body.entryId) {
             entry = await one(tx, 'SELECT * FROM entries WHERE id=$1 AND user_id=$2 AND team_id=$3 FOR UPDATE', [body.entryId, user.id, teamId]);
@@ -351,6 +363,7 @@ export function createApi(options = {}) {
           return table === 'clients' ? { client: clientJson(row) } : { project: projectJson(row) };
         }
         if (path === '/members' && request.method === 'POST') {
+          await tx.query('SELECT id FROM app_locks WHERE id=1 FOR UPDATE');
           const teamId = string(body.teamId, 'Team ID', { min: 1, max: 80 });
           await membership(tx, teamId, user.id, true);
           const account = username(body.username);
@@ -359,18 +372,44 @@ export function createApi(options = {}) {
           const member = await one(tx, 'INSERT INTO memberships(id,team_id,user_id,role) VALUES($1,$2,$3,$4) RETURNING *', [randomUUID(), teamId, addedUser.id, role(body.role)]);
           return { member: memberJson({ ...member, name: addedUser.name, username: addedUser.username }) };
         }
-        const memberMatch = path.match(/^\/members\/([^/]+)$/);
-        if (memberMatch && request.method === 'PATCH') {
-          let previous = await one(tx, 'SELECT * FROM memberships WHERE id=$1', [memberMatch[1]]);
+        const memberMatch = path.match(/^\/members\/([^/]+)(\/password)?$/);
+        if (memberMatch && ((!memberMatch[2] && ['PATCH', 'DELETE'].includes(request.method)) || (memberMatch[2] && request.method === 'POST'))) {
+          // Account-wide changes must serialize with invitations and team creation.
+          await tx.query('SELECT id FROM app_locks WHERE id=1 FOR UPDATE');
+          const previous = await one(tx, 'SELECT * FROM memberships WHERE id=$1', [memberMatch[1]]);
           if (!previous) fail(404, 'not_found', 'Team member not found.');
-          await tx.query('SELECT id FROM teams WHERE id=$1 FOR UPDATE', [previous.team_id]);
+          await tx.query('SELECT id FROM teams WHERE id=$1 FOR NO KEY UPDATE', [previous.team_id]);
           await membership(tx, previous.team_id, user.id, true);
-          previous = await one(tx, 'SELECT * FROM memberships WHERE id=$1', [memberMatch[1]]);
-          if (Object.keys(body).some((key) => key !== 'role') || !own(body, 'role')) fail(400, 'invalid_input', 'Only the role can be changed here. Passwords belong to the account owner.');
-          const nextRole = role(body.role);
-          if (nextRole === 'member' && previous.role === 'admin') {
+          const target = await one(tx, 'SELECT * FROM users WHERE id=$1 FOR NO KEY UPDATE', [previous.user_id]);
+          const accounts = await one(tx, 'SELECT COUNT(*)::integer AS count FROM memberships WHERE user_id=$1', [target.id]);
+          const exclusiveAccount = () => {
+            if (accounts.count !== 1) fail(409, 'shared_account', 'Shared accounts cannot be renamed or have passwords reset by a team admin.');
+          };
+          if (memberMatch[2]) {
+            if (target.id === user.id) fail(400, 'own_password', 'Use Change password in Settings for your own account.');
+            exclusiveAccount();
+            const actor = await one(tx, 'SELECT password_hash FROM users WHERE id=$1', [user.id]);
+            if (!await verifyPassword(password(body.currentPassword, 'Your current password'), actor.password_hash)) fail(401, 'invalid_credentials', 'Your current password is incorrect.');
+            await tx.query('UPDATE users SET password_hash=$1 WHERE id=$2', [await hashPassword(password(body.newPassword, 'New password')), target.id]);
+            await tx.query('DELETE FROM sessions WHERE user_id=$1', [target.id]);
+            return { ok: true };
+          }
+          const removing = request.method === 'DELETE';
+          if (!removing && (!Object.keys(body).length || Object.keys(body).some((key) => !['role', 'name'].includes(key)))) fail(400, 'invalid_input', 'Only name and role can be changed here.');
+          const nextRole = removing ? 'member' : own(body, 'role') ? role(body.role) : previous.role;
+          if (previous.role === 'admin' && nextRole === 'member') {
             const count = await one(tx, "SELECT COUNT(*)::integer AS count FROM memberships WHERE team_id=$1 AND role='admin'", [previous.team_id]);
             if (count.count < 2) fail(409, 'last_admin', 'A team must keep at least one admin.');
+          }
+          if (removing) {
+            const running = await one(tx, 'SELECT * FROM entries WHERE user_id=$1 AND team_id=$2 AND started_at IS NOT NULL FOR UPDATE', [target.id, previous.team_id]);
+            if (running) await stopEntry(tx, running);
+            await tx.query('DELETE FROM memberships WHERE id=$1', [previous.id]);
+            return { ok: true };
+          }
+          if (own(body, 'name')) {
+            exclusiveAccount();
+            await tx.query('UPDATE users SET name=$1 WHERE id=$2', [string(body.name, 'Name', { min: 1, max: 100 }), target.id]);
           }
           await tx.query('UPDATE memberships SET role=$1 WHERE id=$2', [nextRole, previous.id]);
           const updated = await one(tx, 'SELECT m.*,u.name,u.username FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=$1', [previous.id]);

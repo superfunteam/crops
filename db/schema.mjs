@@ -36,10 +36,11 @@ CREATE TABLE IF NOT EXISTS entries (
   status TEXT NOT NULL DEFAULT 'unbilled' CHECK (status IN ('unbilled','invoiced','paid')),
   version INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   FOREIGN KEY(project_id,team_id) REFERENCES projects(id,team_id),
-  FOREIGN KEY(team_id,user_id) REFERENCES memberships(team_id,user_id),
   CHECK (started_at IS NULL OR status = 'unbilled')
 );
 CREATE UNIQUE INDEX IF NOT EXISTS entries_one_running_user ON entries(user_id) WHERE started_at IS NOT NULL;
+-- Historical time survives revoking membership; user/team/project FKs remain.
+ALTER TABLE entries DROP CONSTRAINT IF EXISTS entries_team_id_user_id_fkey;
 CREATE INDEX IF NOT EXISTS entries_team_date ON entries(team_id,date DESC);
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),

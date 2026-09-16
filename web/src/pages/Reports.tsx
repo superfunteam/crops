@@ -165,6 +165,7 @@ export function ReportsPage({
                 {m.name}
               </option>
             ))}
+          {(s.formerMembers ?? []).map((m) => <option key={m.id} value={m.id}>{m.name} · Former member</option>)}
         </Select>
         <Select
           name="project"

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Trash2 } from "lucide-react";
-import type { Client, Entry, Project, Snapshot } from "../types";
+import type { Client, Entry, Member, Project, Snapshot } from "../types";
+import { TeamEditor } from "./TeamEditor";
 import type { Crops } from "../useCrops";
 import { clientName, parseDuration, time, today } from "../lib";
 import { Field, Modal, Select } from "./UI";
@@ -10,6 +11,8 @@ export type Editor =
   | { kind: "client"; client?: Client }
   | { kind: "member" }
   | { kind: "team" }
+  | { kind: "team-edit" }
+  | { kind: "member-edit"; member: Member }
   | { kind: "password" };
 export function Editors({
   editor,
@@ -24,6 +27,8 @@ export function Editors({
 }) {
   const [error, setError] = useState(""),
     [deleting, setDeleting] = useState(false);
+  if (editor.kind === "team-edit" || editor.kind === "member-edit")
+    return <TeamEditor editor={editor} s={s} crops={crops} onClose={onClose} />;
   const entry = editor.kind === "entry" ? editor.entry : undefined,
     project = editor.kind === "project" ? editor.project : undefined,
     client = editor.kind === "client" ? editor.client : undefined;

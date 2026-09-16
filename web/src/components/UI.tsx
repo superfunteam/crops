@@ -87,6 +87,7 @@ export function Modal({
   busy = false,
   error = "",
   footer,
+  submitDanger = false,
 }: {
   title: string;
   children: ReactNode;
@@ -96,6 +97,7 @@ export function Modal({
   busy?: boolean;
   error?: string;
   footer?: ReactNode;
+  submitDanger?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -148,7 +150,7 @@ export function Modal({
             Cancel
           </button>
           {onSubmit && (
-            <button className="button primary" type="submit" disabled={busy}>
+            <button className={`button ${submitDanger ? "danger" : "primary"}`} type="submit" disabled={busy}>
               {busy ? "Saving…" : submit}
               <ArrowRight size={16} />
             </button>

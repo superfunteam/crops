@@ -56,7 +56,7 @@ export function clientName(s: Snapshot, p?: Project) {
   return s.clients.find((c) => c.id === p?.clientId)?.name || "Internal";
 }
 export function personName(s: Snapshot, id: string) {
-  return s.members.find((m) => m.userId === id)?.name || "Team member";
+  return s.members.find((m) => m.userId === id)?.name || s.formerMembers?.find((m) => m.id === id)?.name || "Former member";
 }
 export const initials = (name: string) =>
   name

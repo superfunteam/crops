@@ -1140,6 +1140,7 @@ small,
 }
 .team-banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 17px;
   padding: 23px 25px;
@@ -1491,6 +1492,7 @@ small,
 }
 .modal-footer {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   padding: 17px 24px;
@@ -1505,6 +1507,13 @@ small,
   border-radius: 7px;
   font-size: 13px;
   margin: 0 24px 18px;
+}
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
 }
 .error-banner {
   display: flex;

@@ -22,7 +22,7 @@ macOS keeps tokens in Keychain. Android encrypts them through Keystore and disab
 
 Use your PostgreSQL provider’s scheduled backups and recovery tools. Treat `.data/` and `.env` as private. Keep password hashes, session tables and exports out of public repositories. Store distribution signing keys separately from source.
 
-Admin-created teammate accounts use an initial password that should be shared privately and changed by the teammate. The app does not send email, reset links, or notifications to other people. Account recovery currently requires an operator with database access; there is no self-service forgotten-password flow.
+Admin-created teammate accounts use an initial password that should be shared privately and changed by the teammate. The app does not send email, reset links, or notifications to other people. Team admins can reset passwords for accounts belonging only to their team after entering their own password; this signs the teammate out on every device. Shared-account and sole-admin recovery require an operator with database access. There is no self-service forgotten-password flow.
 
 All amounts are derived from the current project rate and tracked time, in USD. Changing a rate changes historical *displayed amounts*; recorded time and invoiced/paid status remain. Crops is not an invoice ledger or payment processor. Keep official invoice amounts and receipts in your bank.
 
@@ -32,7 +32,7 @@ All amounts are derived from the current project rate and tracked time, in USD. 
 - Foreground/background activity can consume hosting and database quotas. ETags reduce bandwidth, not the number of API requests. Inspect your provider usage after the first week before relying on a free-tier ceiling.
 - State snapshots currently include the accessible team's history. This is suitable for a small internal team; date-window pagination and incremental database queries should be added before very large histories.
 - No offline creation/editing, Harvest CSV import, automatic activity detection, idle-time removal, expense tracking, invoice generation, multi-currency ledger, timesheet approval, or project-specific membership ACLs.
-- Team admins can add members and change roles; removal/deactivation/account deletion are not yet exposed. Use deliberate operator-level procedures for offboarding until that flow is added.
+- Team admins can edit names and roles, reset eligible passwords, and remove members. Removal stops the member’s timer in that team and preserves recorded time and billing history. The last admin cannot be removed or demoted. Global account deletion is not exposed.
 - App artifacts are internal builds. Signing/notarization and store distribution remain owner-controlled steps.
 
 ## Local database safety

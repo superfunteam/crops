@@ -80,3 +80,20 @@ test('bootstrap retirement refuses an unrotated account that has already been us
     assert.equal((await db.query('SELECT token_hash FROM sessions')).rows.length, 1);
   });
 });
+
+test('member removal migration preserves historical entries and their remaining foreign keys', async () => {
+  await fixture(async db => {
+    await db.exec(bootstrap);
+    const member = (await db.query('SELECT * FROM memberships')).rows[0];
+    const project = (await db.query('SELECT id FROM projects')).rows[0];
+    await db.query("INSERT INTO entries(id,team_id,user_id,project_id,date,duration_seconds) VALUES('history',$1,$2,$3,'2026-09-16',3600)", [member.team_id, member.user_id, project.id]);
+    await assert.rejects(db.query('DELETE FROM memberships WHERE id=$1', [member.id]));
+    const removal = await migration('20260916190000_preserve_former_member_time');
+    await db.exec(removal);
+    await db.exec(removal);
+    await db.query('DELETE FROM memberships WHERE id=$1', [member.id]);
+    assert.equal((await db.query("SELECT duration_seconds FROM entries WHERE id='history'")).rows[0].duration_seconds, 3600);
+    await assert.rejects(db.query('DELETE FROM users WHERE id=$1', [member.user_id]));
+    await assert.rejects(db.query('DELETE FROM projects WHERE id=$1', [project.id]));
+  });
+});

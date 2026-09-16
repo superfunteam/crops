@@ -4,7 +4,7 @@ Verified on September 15–16, 2026 on Apple silicon macOS, plus an Android 15 e
 
 ## Automated checks
 
-- `npm test`: 35 total, 34 passed; the separate real-PostgreSQL integration test is skipped unless `CROPS_TEST_DATABASE_URL` is supplied.
+- `npm test`: 43 total, 42 passed; the separate real-PostgreSQL integration test is skipped unless `CROPS_TEST_DATABASE_URL` is supplied.
 - Backend suite with isolated PostgreSQL 18.6 and `TZ=Asia/Tokyo`: 23/23 passed. Covers authentication, secure session storage, cross-team permissions, concurrent timers, last-admin protection, idempotent writes, stale edits, billing locks, persistent throttling, and durable restart.
 - After the Netlify Database adapter and deployment migration were added, its dedicated PostgreSQL test passed again. It verifies four connection pools, consistent state snapshots, SQL DATE timezone handling, RLS denial for an unprivileged role, no runtime schema creation in native mode, and private owner setup without a session.
 - Seven web checks cover lossless seconds, manual durations, timers after suspension, calendar/DST arithmetic, network retries reusing the same request key, conditional state caching with fresh server time, and CDN-generated 304 clock fallback.
@@ -25,7 +25,7 @@ Desktop and 390×844 mobile layouts were inspected. Mobile time and billing page
 
 ## Production checks
 
-The deployment's canonical URL is https://crops.wims.vc. Native Netlify Database is provisioned, all four deployment migrations are applied, the owner workspace is usable, and `/api/health` returns `storage: netlify-postgres` with registration disabled. Hosted native downloads return the correct MIME types and exactly match local SHA-256 hashes:
+The deployment's canonical URL is https://crops.wims.vc. Native Netlify Database is provisioned, all deployment migrations are applied, the owner workspace is usable, and `/api/health` returns `storage: netlify-postgres` with registration disabled. Hosted native downloads return the correct MIME types and exactly match local SHA-256 hashes:
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -37,3 +37,7 @@ Custom-domain deployment `6aaac4eb9a1c8ea973c98c60` was verified on September 16
 ## Practical limits
 
 These checks do not establish app-store readiness, performance with years of large-team history, or background-delivery guarantees on every Android vendor. macOS distribution is not notarized; Android downloads use debug signing. Sync is polling-based and requires connectivity. See [operations](OPERATIONS.md) for scope and maintenance.
+
+## Team management
+
+Automated coverage verifies admin-only team/member editing, password reauthentication and session revocation, shared-account protection, last-admin protection, removal with preserved history, rejoining, and timer/removal concurrency. A migration test verifies existing time survives membership removal while user/project foreign keys remain enforced. Browser checks on disposable local data verified member editing and the password-reset/removal dialogs. No production member credentials or membership were changed for testing.

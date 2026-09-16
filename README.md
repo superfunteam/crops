@@ -41,7 +41,7 @@ These artifacts are **internal test builds**: macOS is ad hoc signed and not not
 
 ## What works
 
-- Username/password accounts, secure sessions, password changes, multiple teams, admin/member permissions.
+- Username/password accounts, secure sessions, password changes, multiple teams, admin/member permissions, team renaming, member editing/removal, and admin password resets for accounts exclusive to the team.
 - Clients, projects, project codes/colors, hourly rates, hour budgets, archiving/restoring.
 - One running timer per person across all teams and devices. Starting another timer stops the previous one atomically.
 - Start, stop, resume, manual time, notes/tasks, daily and weekly timesheets.

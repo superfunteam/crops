@@ -13,6 +13,7 @@ export interface Team {
 export interface Member extends User {
   userId: string;
   role: Role;
+  canManageAccount?: boolean;
 }
 export interface Client {
   id: string;
@@ -52,6 +53,7 @@ export interface Snapshot {
   teams: Team[];
   team: Team;
   members: Member[];
+  formerMembers?: User[];
   clients: Client[];
   projects: Project[];
   entries: Entry[];

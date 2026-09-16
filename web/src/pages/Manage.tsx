@@ -424,6 +424,7 @@ export function TeamPage({ s, crops, edit }: Props) {
             and billing.
           </p>
         </div>
+        {admin && <button type="button" className="button subtle" onClick={() => edit({ kind: "team-edit" })}>Edit team</button>}
       </div>
       <div className="table-scroll">
         <table className="data-table">
@@ -433,6 +434,7 @@ export function TeamPage({ s, crops, edit }: Props) {
               <th>Username</th>
               <th>Tracked time{admin ? "" : " visible to you"}</th>
               <th>Role</th>
+              {admin && <th><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
@@ -465,7 +467,7 @@ export function TeamPage({ s, crops, edit }: Props) {
                       name={`role-${m.id}`}
                       aria-label={`Role for ${m.name}`}
                       value={m.role}
-                      disabled={crops.busy}
+                      disabled={crops.busy || (m.role === "admin" && s.members.filter(person => person.role === "admin").length === 1)}
                       onChange={(e) =>
                         void crops
                           .mutate(
@@ -483,6 +485,7 @@ export function TeamPage({ s, crops, edit }: Props) {
                     <span>{m.role === "admin" ? "Admin" : "Member"}</span>
                   )}
                 </td>
+                {admin && <td><button type="button" className="button subtle" disabled={crops.busy} aria-label={`Edit ${m.name}`} onClick={() => edit({ kind: "member-edit", member: m })}>Edit</button></td>}
               </tr>
             ))}
           </tbody>

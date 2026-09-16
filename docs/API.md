@@ -18,9 +18,11 @@ The web, macOS menu bar, and Android apps share `/api`. Development runs on `htt
 ```json
 {
   "user": {"id":"uuid","name":"Alex","username":"alex"},
-  "teams": [{"id":"uuid","name":"Studio","role":"admin"}],
+  "teams": [{"id":"uuid","name":"Studio","role":"admin","canManageAccount":true}],
+  "formerMembers": [],
   "team": {"id":"uuid","name":"Studio","role":"admin"},
-  "members": [{"id":"uuid","userId":"uuid","name":"Alex","username":"alex","role":"admin"}],
+  "members": [{"id":"uuid","userId":"uuid","name":"Alex","username":"alex","role":"admin","canManageAccount":true}],
+  "formerMembers": [],
   "clients": [{"id":"uuid","teamId":"uuid","name":"Internal","email":"","archived":false}],
   "projects": [{"id":"uuid","teamId":"uuid","clientId":"uuid","name":"General","code":"","color":"#C56845","billable":true,"rate":0,"budgetHours":0,"archived":false}],
   "entries": [{"id":"uuid","teamId":"uuid","userId":"uuid","projectId":"uuid","task":"Design","notes":"","date":"2026-09-15","durationSeconds":3600,"startedAt":null,"billable":true,"status":"unbilled","version":1}],
@@ -29,7 +31,7 @@ The web, macOS menu bar, and Android apps share `/api`. Development runs on `htt
 }
 ```
 
-`durationSeconds` is accumulated **completed** time. While running, display that plus seconds since `startedAt`, using `serverTime` to correct clock drift. There is at most one running timer per user across all teams. `runningEntry` reports that timer even when a different team is selected. State returns all team entries for admins and only the current user's entries for members. A state response uses one repeatable database snapshot, so its entry list and running timer agree even during concurrent changes. Refetch after every mutation; poll every 5 seconds while active and immediately on foreground/focus. No offline mutation is silently accepted.
+`durationSeconds` is accumulated **completed** time. While running, display that plus seconds since `startedAt`, using `serverTime` to correct clock drift. There is at most one running timer per user across all teams. `runningEntry` reports that timer even when a different team is selected. State returns all team entries for admins and only the current user's entries for members. A state response uses one repeatable database snapshot, so its entry list and running timer agree even during concurrent changes. For admins, `canManageAccount` marks accounts exclusive to this team, and `formerMembers` supplies names for historical entries after membership removal. Refetch after every mutation; poll every 5 seconds while active and immediately on foreground/focus. No offline mutation is silently accepted.
 
 `GET /state` returns a weak `ETag` for the application state, excluding its changing clock field. Cache the snapshot per authenticated account and full request path, then send `If-None-Match` with subsequent requests. Unchanged data returns **304 with no body**, the current ETag, and `X-Crops-Server-Time` containing the database clock in ISO format. Reuse the cached snapshot and update the clock offset from that header. If an intermediary removes that custom header, use the standard response `Date` header (whole-second precision). The API also accepts Netlify's documented `-df` compressed variant of the exact same ETag hash, so compression does not force a full origin response. Clear cached snapshots on login/logout. Timer ticking does not change the ETag; local elapsed-time calculation continues. Every state response remains `Cache-Control: no-store`; this is explicit application caching, not a browser/shared cache.
 
@@ -52,12 +54,15 @@ A replay returns the original response, which can now be stale: for example, rep
 ## Teams / management
 
 - `POST /teams` `{name}` → `{team}`. Creates a team with the caller as admin and a General project.
+- `PATCH /teams/:id` `{name}` → `{team}`. Admin renames the team (1–100 characters).
 - `POST /clients` `{teamId,name,email?,archived?}` → `{client}`.
 - `PATCH /clients/:id` `{name?,email?,archived?}` → `{client}`.
 - `POST /projects` `{teamId,clientId?,name,code?,color?,billable?,rate?,budgetHours?}` → `{project}`. `rate` is a nonnegative currency amount per hour; `budgetHours` is nonnegative hours. Color is six-digit CSS hex.
 - `PATCH /projects/:id` allows project fields above and `archived`. Projects with a running timer cannot be archived.
 - `POST /members` `{teamId,username,name?,password?,role?}` → `{member}`. Admin adds an existing username to this team, or creates a new user (name and password required). Existing account credentials are never changed by joining a team. Role is `member` (default) or `admin`.
-- `PATCH /members/:id` `{role}` → `{member}`. Admin role changes; the last admin cannot be demoted. Password changes are deliberately not an admin operation, since an account may belong to other teams.
+- `PATCH /members/:id` `{role?,name?}` → `{member}`. Admin edits a member. Names can be changed only for accounts exclusive to this team. The last admin cannot be demoted.
+- `DELETE /members/:id` → `{ok:true}`. Admin revokes membership and stops any timer in this team. Recorded time and billing history remain. The last admin cannot be removed.
+- `POST /members/:id/password` `{currentPassword,newPassword}` → `{ok:true}`. Admin resets another member’s password after verifying the admin’s own current password. Only accounts exclusive to this team are eligible. All target sessions are revoked; running timers are preserved. This route is rate limited. Use Settings for your own password.
 - `POST /auth/password` `{currentPassword,newPassword}` → `{ok:true}`. Changes the caller's password and revokes every other session.
 
 Clients, projects, members, and billing status require team admin access. Cross-team IDs are rejected. Archived projects cannot receive new time. Data is retained when clients/projects are archived.
