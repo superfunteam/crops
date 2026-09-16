@@ -19,13 +19,14 @@ Open the app and sign in or create a workspace. Fresh installs connect to **`htt
 
 ## Everyday use
 
-- Click the leaf in your menu bar, choose a project, describe your work, and start the timer. The menu bar shows running hours and minutes.
+- The menu bar always shows Crops: a paused `0:00` while idle, a filled play indicator and live `h:mm:ss` while running, and a warning indicator when sync needs attention. Hover for the current project and task. Closing the companion window keeps the app running; **Quit Crops** exits explicitly.
+- Click **+ New entry** to choose a project and start a timer. The form opens only after that action; **Back** or Escape returns to the timesheet. A successful start returns to the active timer automatically.
 - Stop from the green timer panel. Stop sends the displayed entry version, so an outdated window cannot stop a newer session resumed elsewhere. Resume a stopped unbilled entry using its play button.
-- Use **+** beside “What are you working on?” to add manual time. Enter `1:30` or `1.5` for 90 minutes.
-- Navigate days or weeks above the timer to review your personal time. Management, team membership, project setup, and invoiced/paid status live in **Open web**.
+- Choose **New entry → Manual time** to add time. Enter `1:30` or `1.5` for 90 minutes. Saving returns to that day's entries.
+- Navigate days or weeks below the active timer to review your personal time. Management, team membership, project setup, and invoiced/paid status live in **Open web**.
 - Use the team menu to switch workspaces. Your one active timer remains visible across teams.
 - Settings includes account information, sync status, sign out, and Quit. The timer keeps running on the server when the window or app closes.
-- `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management.
+- `⌘N` opens a new entry from the timesheet; `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management. These shortcuts apply while Crops is active.
 
 ## Sync and reliability
 

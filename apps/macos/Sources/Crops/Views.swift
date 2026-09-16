@@ -159,46 +159,60 @@ struct LoginView: View {
 
 struct TrackerView: View {
     @EnvironmentObject var store: CropsStore
+    @State private var showComposer = false
     @State private var manual = false
     @State private var duration = ""
     @State private var manualDate = Date()
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                WeekStrip()
                 ErrorBanner()
-                if let running = store.state?.runningEntry { runningCard(running) }
-                else { composer }
-                HStack(alignment: .firstTextBaseline) {
-                    Text(Calendar.current.isDateInToday(store.selectedDay) ? "Today’s time" : store.selectedDay.formatted(.dateTime.month(.abbreviated).day())).font(.system(size: 17, weight: .medium, design: .serif))
-                    Spacer()
-                    Text(CropsTime.clock(store.dayTotal, seconds: false)).font(.system(size: 16, weight: .semibold)).monospacedDigit()
-                }.padding(.top, 5)
-                if store.dayEntries.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "sun.horizon").font(.system(size: 25, weight: .light)).foregroundStyle(Palette.accent)
-                        Text("A fresh start.").font(.system(size: 13, weight: .medium))
-                        Text("The time you track will appear here.").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }.frame(maxWidth: .infinity).padding(.vertical, 26)
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(store.dayEntries) { entry in
-                            EntryRow(entry: entry)
-                            if entry.id != store.dayEntries.last?.id { Divider().padding(.leading, 25).opacity(0.5) }
-                        }
-                    }.padding(.horizontal, 12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 12))
-                }
-                if store.state?.runningEntry != nil {
-                    Text("Your timer keeps running when this window closes.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+                if showComposer { composer }
+                else {
+                    HStack {
+                        Label(store.state?.runningEntry == nil ? "No timer running" : "Timer running", systemImage: store.state?.runningEntry == nil ? "pause.circle" : "play.circle.fill")
+                            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            manual = false; duration = ""; manualDate = min(store.selectedDay, Date())
+                            store.task = ""; store.notes = ""; showComposer = true
+                        } label: { Label("New entry", systemImage: "plus").font(.system(size: 11, weight: .semibold)) }
+                            .buttonStyle(.bordered).disabled(store.busy).keyboardShortcut("n")
+                            .accessibilityLabel("New entry")
+                    }
+                    if let running = store.state?.runningEntry { runningCard(running) }
+                    WeekStrip()
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(Calendar.current.isDateInToday(store.selectedDay) ? "Today’s time" : store.selectedDay.formatted(.dateTime.month(.abbreviated).day())).font(.system(size: 17, weight: .medium, design: .serif))
+                        Spacer()
+                        Text(CropsTime.clock(store.dayTotal, seconds: false)).font(.system(size: 16, weight: .semibold)).monospacedDigit()
+                    }.padding(.top, 5)
+                    if store.dayEntries.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "sun.horizon").font(.system(size: 25, weight: .light)).foregroundStyle(Palette.accent)
+                            Text("A fresh start.").font(.system(size: 13, weight: .medium))
+                            Text("The time you track will appear here.").font(.system(size: 11)).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity).padding(.vertical, 26)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(store.dayEntries) { entry in
+                                EntryRow(entry: entry)
+                                if entry.id != store.dayEntries.last?.id { Divider().padding(.leading, 25).opacity(0.5) }
+                            }
+                        }.padding(.horizontal, 12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    if store.state?.runningEntry != nil {
+                        Text("Your timer keeps running when this window closes.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+                    }
                 }
             }.padding(.horizontal, 24).padding(.bottom, 22)
-        }
+        }.onChange(of: store.state?.team.id) { _ in showComposer = false }
     }
     private func runningCard(_ entry: Entry) -> some View {
         VStack(alignment: .leading, spacing: 17) {
             HStack {
                 Circle().fill(Palette.mint).frame(width: 6, height: 6)
-                Text("GROWING NOW").font(.system(size: 9, weight: .semibold)).tracking(1.5)
+                Text("TIMER RUNNING").font(.system(size: 9, weight: .semibold)).tracking(1.5)
                 Spacer()
                 Image(systemName: "waveform.path").foregroundStyle(Palette.mint)
             }.foregroundStyle(Palette.mint)
@@ -222,9 +236,19 @@ struct TrackerView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
+                Button { showComposer = false } label: { Label("Back", systemImage: "chevron.left") }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).disabled(store.busy)
+                    .keyboardShortcut(.cancelAction).accessibilityLabel("Cancel new entry")
+                Spacer()
+                Text("NEW ENTRY").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
+            }.padding(.bottom, 6)
+            Picker("Entry type", selection: $manual) {
+                Text("Timer").tag(false)
+                Text("Manual time").tag(true)
+            }.pickerStyle(.segmented).labelsHidden().disabled(store.busy)
+            HStack {
                 Text(manual ? "Add a little time." : "What are you working on?").font(.system(size: 18, weight: .medium, design: .serif))
                 Spacer()
-                Button { manual.toggle(); manualDate = store.selectedDay } label: { Image(systemName: manual ? "timer" : "plus").font(.system(size: 13)).frame(width: 25, height: 25) }.buttonStyle(.plain).help(manual ? "Switch to timer" : "Add time manually").accessibilityLabel(manual ? "Switch to timer" : "Add time manually")
             }
             if store.activeProjects.isEmpty {
                 Text("Your team is ready. Add a project in the web app to start tracking.").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -246,11 +270,19 @@ struct TrackerView: View {
                         DatePicker("Date", selection: $manualDate, in: ...Date(), displayedComponents: .date).datePickerStyle(.field).font(.system(size: 11)).frame(width: 155).padding(.bottom, 9)
                     }
                 }
-                HStack { Toggle("Billable", isOn: $store.billable).toggleStyle(.checkbox).font(.system(size: 11)); Spacer(); if manual { Button("Use timer") { manual = false }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Palette.accent) } }
+                Toggle("Billable", isOn: $store.billable).toggleStyle(.checkbox).font(.system(size: 11))
+                if !manual && store.state?.runningEntry != nil {
+                    Text("Starting a new timer will stop your current timer and save its time.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 Button {
                     Task {
-                        if manual { if await store.addManual(date: manualDate, duration: duration) { store.selectedDay = Calendar.current.startOfDay(for: manualDate); duration = ""; manual = false } }
-                        else { await store.start() }
+                        if manual {
+                            if await store.addManual(date: manualDate, duration: duration) {
+                                store.selectedDay = Calendar.current.startOfDay(for: manualDate); showComposer = false
+                            }
+                        } else if await store.start() {
+                            store.selectedDay = Calendar.current.startOfDay(for: Date()); showComposer = false
+                        }
                     }
                 } label: { HStack { Image(systemName: manual ? "plus" : "play.fill").font(.system(size: 10)); Text(store.busy ? "Saving…" : manual ? "Save time" : "Start timer") } }
                     .buttonStyle(PrimaryButtonStyle()).disabled(store.busy || store.selectedProject.isEmpty || (manual && CropsTime.parseDuration(duration) == nil))
@@ -344,7 +376,7 @@ struct SettingsView: View {
                     Button("Sign out") { confirmingLogout = true }.disabled(store.busy)
                 }
                 Divider()
-                HStack { VStack(alignment: .leading, spacing: 4) { Text("Crops for Mac").font(.system(size: 12, weight: .medium)); Text("Version 1.0 · Made for focused work").font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "leaf").font(.title2).foregroundStyle(Palette.accent) }
+                HStack { VStack(alignment: .leading, spacing: 4) { Text("Crops for Mac").font(.system(size: 12, weight: .medium)); Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0") · Made for focused work").font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "leaf").font(.title2).foregroundStyle(Palette.accent) }
                 Button("Quit Crops") { NSApp.terminate(nil) }
                 Text("Quitting leaves your server timer running. Stop it first when you’re done for the day.").font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
             }.padding(.horizontal, 24).padding(.bottom, 24)

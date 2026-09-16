@@ -17,6 +17,15 @@ expect(CropsServer.resolvedOrigin("https://time.example.com") == "https://time.e
 let lookalike = CropsServer.previousProductionOrigin + ".example.com"
 expect(CropsServer.resolvedOrigin(lookalike) == lookalike && !CropsServer.needsMigration(lookalike), "migration matches the entire origin only")
 
+let idleMenu = CropsMenuStatus(signedIn: true, loaded: true, runningElapsed: nil, healthy: true)
+expect(idleMenu.title == "0:00" && idleMenu.symbol == "pause.circle", "idle menu keeps a visible clock and distinct paused state")
+let runningMenu = CropsMenuStatus(signedIn: true, loaded: true, runningElapsed: 3661, healthy: true)
+expect(runningMenu.title == "1:01:01" && runningMenu.symbol == "play.circle.fill", "active menu shows live seconds and running state")
+let offlineMenu = CropsMenuStatus(signedIn: true, loaded: true, runningElapsed: 3662, healthy: false)
+expect(offlineMenu.title == "1:01:02" && offlineMenu.symbol == "exclamationmark.circle", "sync failures keep the last known timer advancing with a warning")
+expect(CropsMenuStatus(signedIn: true, loaded: false, runningElapsed: nil, healthy: false).title == "—:—", "loading never claims the server timer is stopped")
+expect(CropsMenuStatus(signedIn: false, loaded: false, runningElapsed: nil, healthy: false).title == "Crops", "signed-out app stays discoverable in menu bar")
+
 let data = Data("""
 {"id":"e1","teamId":"t1","userId":"u1","projectId":"p1","task":"Build","notes":"","date":"2026-09-15","durationSeconds":120,"startedAt":"2026-09-15T15:00:00.000Z","billable":true,"status":"unbilled","version":1}
 """.utf8)

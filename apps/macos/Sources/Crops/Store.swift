@@ -69,7 +69,8 @@ enum SessionKeychain {
             api = client
             signedIn = true
         }
-        clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.now = Date() } }
+        clockTimer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.now = Date() } }
+        if let clockTimer { RunLoop.main.add(clockTimer, forMode: .common) }
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in await self?.sync() } })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in await self?.sync() } })
         syncTask = Task { [weak self] in
@@ -90,7 +91,16 @@ enum SessionKeychain {
         }
     }
     var dayTotal: TimeInterval { dayEntries.reduce(0) { $0 + elapsed($1) } }
-    var menuTitle: String { state?.runningEntry.map { CropsTime.clock(elapsed($0), seconds: false) } ?? "" }
+    var menuStatus: CropsMenuStatus {
+        CropsMenuStatus(signedIn: signedIn, loaded: state != nil, runningElapsed: state?.runningEntry.map { elapsed($0) }, healthy: healthy)
+    }
+    var menuHelp: String {
+        if let entry = state?.runningEntry {
+            let projectName = project(entry.projectId)?.name ?? "Another team"
+            return "Crops · \(projectName) · \(entry.task.isEmpty ? "Focused work" : entry.task) · \(menuStatus.title)\(healthy ? " — Running" : " — Waiting to sync")"
+        }
+        return "Crops — \(menuStatus.detail). Click to open your timer."
+    }
     var healthy: Bool { error == nil && (lastSync.map { Date().timeIntervalSince($0) < 45 } ?? false) }
     func elapsed(_ entry: Entry) -> TimeInterval { entry.elapsed(at: now, serverOffset: serverOffset) }
     func project(_ id: String) -> Project? { state?.projects.first { $0.id == id } }
@@ -167,12 +177,12 @@ enum SessionKeychain {
         do { accept(try await api.state(teamId: id)); task = ""; notes = ""; selectProject(activeProjects.first?.id ?? "") }
         catch { handle(error) }
     }
-    func start(entry: Entry? = nil) async {
-        guard let team = state?.team else { return }
+    @discardableResult func start(entry: Entry? = nil) async -> Bool {
+        guard let team = state?.team else { return false }
         var body: [String: Any] = ["teamId": entry?.teamId ?? team.id, "projectId": entry?.projectId ?? selectedProject, "task": entry?.task ?? task.trimmingCharacters(in: .whitespacesAndNewlines), "notes": entry?.notes ?? notes, "billable": entry?.billable ?? billable]
         if let entry { body["entryId"] = entry.id }
         else { body["date"] = CropsTime.dateKey(Date()) }
-        await mutate(path: "/api/timer/start", body: body)
+        return await mutate(path: "/api/timer/start", body: body)
     }
     func stop(entry displayedEntry: Entry? = nil) async {
         guard let entry = displayedEntry ?? state?.runningEntry else { return }

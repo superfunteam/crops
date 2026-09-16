@@ -43,3 +43,11 @@ Repeated ad-hoc development rebuilds have different code signatures. macOS may p
 The packaged app defaults fresh installs to `https://crops.wims.vc`. The exact previous production origin migrates to this address on upgrade; its old Keychain entry and remembered team selection are cleared, so a fresh sign-in may be required. Existing custom/local server preferences remain in effect, and the login form still accepts another HTTPS origin or a loopback development server. Both architectures were rebuilt and all 38 core checks passed after the domain change.
 
 Hosted native API smoke previously passed against the original Netlify origin using a disposable workspace. A native login/timer test has not been repeated against `https://crops.wims.vc`; current custom-domain DNS, TLS, and API health results are tracked by the deployment checks.
+
+## Version 1.1.0 — timer-first interface
+
+- Universal arm64/x86_64 build and strict ad hoc signature verification passed.
+- 43 core checks passed, including menu-label states for signed-out, loading, idle, running with seconds, and failed sync while the elapsed timer continues.
+- Actual native UI checks used a separate app identifier and disposable local workspace on port 8791. The default home has no entry form; New entry opens it, Back dismisses it, and successful timer/manual entry submissions return to the timesheet. A five-minute manual entry appeared correctly. Start and Stop controls updated the active timer panel.
+- Closing the last window initially terminated the test app. An explicit application delegate now keeps it resident; the same process ID remained after closing the window and switching to Finder. Reopening retained the current timer state. Explicit Quit still exited.
+- The clock runs in common run-loop modes so menu interaction does not suspend its tick. Menu-bar presentation is covered by the native state checks above; the UI automation's window screenshots do not include the system status bar.
