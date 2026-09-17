@@ -15,6 +15,7 @@ import type { Snapshot, Entry } from "../types";
 import type { Editor } from "../components/Editors";
 import {
   addDays,
+  agentLabel,
   clientName,
   duration,
   exportCSV,
@@ -342,6 +343,14 @@ export function TimePage({
                   <h3>
                     {p?.name || "Project"}{" "}
                     <span className="task-tag">{e.task}</span>
+                    {e.agent && (
+                      <span
+                        className="task-tag"
+                        title={`Agent usage${e.agent.model ? ` · ${e.agent.model}` : ""}`}
+                      >
+                        {agentLabel(e)}
+                      </span>
+                    )}
                   </h3>
                   <p>{e.notes || "No notes added."}</p>
                 </div>

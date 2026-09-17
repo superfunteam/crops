@@ -25,7 +25,7 @@ The web, macOS menu bar, and Android apps share `/api`. Development runs on `htt
   "formerMembers": [],
   "clients": [{"id":"uuid","teamId":"uuid","name":"Internal","email":"","archived":false}],
   "projects": [{"id":"uuid","teamId":"uuid","clientId":"uuid","name":"General","code":"","color":"#C56845","billable":true,"rate":0,"budgetHours":0,"archived":false}],
-  "entries": [{"id":"uuid","teamId":"uuid","userId":"uuid","projectId":"uuid","task":"Design","notes":"","date":"2026-09-15","durationSeconds":3600,"startedAt":null,"billable":true,"status":"unbilled","version":1}],
+  "entries": [{"id":"uuid","teamId":"uuid","userId":"uuid","projectId":"uuid","task":"Design","notes":"","date":"2026-09-15","durationSeconds":3600,"startedAt":null,"billable":true,"status":"unbilled","agent":{"tokens":2410000,"cost":31.4,"model":"claude-opus-5"},"version":1}],
   "runningEntry": null,
   "serverTime": "2026-09-15T16:00:00.000Z"
 }
@@ -45,11 +45,15 @@ A replay returns the original response, which can now be stale: for example, rep
 
 ## Timer and timesheets
 
-- `POST /timer/start` `{teamId,projectId,task,notes,billable,entryId?}` → `{entry}`. Creates a timer or resumes an existing own unbilled entry. Atomically stops any previous running timer first. Starting the already-running entry is idempotent. Optional `date` is an ISO calendar date; it defaults to the server's current UTC date.
-- `POST /timer/stop` `{entryId}` → `{entry}`. Stops an own timer; repeated stops are idempotent. Optional `version` enables stale-update checks.
-- `POST /entries` `{teamId,projectId,task,notes,date,durationSeconds,billable}` → `{entry}`. Duration must be a whole number from 0 through 604800 seconds (one week). Admin may include `userId` to enter time for a team member.
-- `PATCH /entries/:id` `{version,task?,notes?,date?,durationSeconds?,projectId?,billable?,status?}` → `{entry}`. Required version must match current state. Members edit only their own unbilled time. Admins may change billing status: `unbilled`, `invoiced`, or `paid`. Invoiced/paid time is locked; to change details, an admin must first send a separate status-only update to `unbilled`. Running entries must be stopped before changing duration, date, or billing status.
+- `POST /timer/start` `{teamId,projectId,task,notes,billable,entryId?,agent?}` → `{entry}`. Creates a timer or resumes an existing own unbilled entry. Atomically stops any previous running timer first. Starting the already-running entry is idempotent. Optional `date` is an ISO calendar date; it defaults to the server's current UTC date.
+- `POST /timer/stop` `{entryId,agent?}` → `{entry}`. Stops an own timer; repeated stops are idempotent. Optional `version` enables stale-update checks. `agent` attaches usage while stopping (for example from an agent's Stop hook); repeating the recorded usage is a no-op, and invoiced/paid entries reject a change with 409 `entry_locked`.
+- `POST /entries` `{teamId,projectId,task,notes,date,durationSeconds,billable,agent?}` → `{entry}`. Duration must be a whole number from 0 through 604800 seconds (one week). Admin may include `userId` to enter time for a team member.
+- `PATCH /entries/:id` `{version,task?,notes?,date?,durationSeconds?,projectId?,billable?,status?,agent?}` → `{entry}`. Required version must match current state. Members edit only their own unbilled time. Admins may change billing status: `unbilled`, `invoiced`, or `paid`. Invoiced/paid time is locked; to change details, an admin must first send a separate status-only update to `unbilled`. Running entries must be stopped before changing duration, date, or billing status.
 - `DELETE /entries/:id?version=N` → `{ok:true}`. Version may instead be supplied in a JSON body. Only stopped unbilled entries can be deleted.
+
+### Agent usage
+
+Entries carry optional agent-reported usage: `agent` is `null` or `{tokens,cost,model}`. The agent computes its own numbers; Crops does not meter anything. `tokens` is a whole number from 0 through 1,000,000,000,000. `cost` is a nonnegative USD amount with at most two decimal places (up to 1,000,000). `model` is optional (at most 100 characters; empty or omitted is stored as `null`). Unknown keys, strings for numbers, or partial objects return 400 `invalid_input`. Sending `agent` replaces the recorded usage; `agent:null` clears it. PATCH changes follow the same version, member, and billing-lock rules as other entry fields, and usage can be updated while a timer runs. Billable entries are valued at hours × current project rate **plus** `agent.cost` in reports, billing totals, and CSV export (which also includes agent token and cost columns). See [MCP.md](MCP.md) for the agent MCP server and hooks.
 
 ## Teams / management
 

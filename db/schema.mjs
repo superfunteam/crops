@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE UNIQUE INDEX IF NOT EXISTS entries_one_running_user ON entries(user_id) WHERE started_at IS NOT NULL;
 -- Historical time survives revoking membership; user/team/project FKs remain.
 ALTER TABLE entries DROP CONSTRAINT IF EXISTS entries_team_id_user_id_fkey;
+-- Agent-reported usage (tokens and USD cost) billed on top of hours × rate.
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS agent_tokens BIGINT CHECK (agent_tokens >= 0);
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS agent_cost NUMERIC(12,2) CHECK (agent_cost >= 0);
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS agent_model TEXT CHECK (char_length(agent_model) BETWEEN 1 AND 100);
+DO $crops_agent_usage$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='entries_agent_complete' AND conrelid='entries'::regclass) THEN
+    ALTER TABLE entries ADD CONSTRAINT entries_agent_complete CHECK ((agent_tokens IS NULL) = (agent_cost IS NULL) AND (agent_model IS NULL OR agent_tokens IS NOT NULL));
+  END IF;
+END
+$crops_agent_usage$;
 CREATE INDEX IF NOT EXISTS entries_team_date ON entries(team_id,date DESC);
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),

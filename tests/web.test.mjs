@@ -192,3 +192,25 @@ test("blog Markdown renders headings, tables, quotes and inline formatting", asy
     ].join("\n"),
   );
 });
+test("billable amounts add agent-reported cost on top of hours × rate", async () => {
+  const { entryAmount, agentLabel, tokens } = await import("../web/src/lib.ts");
+  const agent = { tokens: 2410000, cost: 31.4, model: "claude-opus-5" };
+  const entry = {
+    durationSeconds: 5400,
+    startedAt: null,
+    billable: true,
+    agent,
+  };
+  assert.equal(entryAmount(entry, 100, Date.now()), 181.4);
+  assert.equal(entryAmount({ ...entry, agent: null }, 100, Date.now()), 150);
+  assert.equal(entryAmount({ ...entry, billable: false }, 100, Date.now()), 0);
+  assert.equal(
+    entryAmount({ ...entry, durationSeconds: 0 }, 0, Date.now()),
+    31.4,
+  );
+  assert.equal(agentLabel(entry), "2.41M tokens · $31.40");
+  assert.equal(agentLabel({ agent: null }), "");
+  assert.equal(tokens(999), "999 tokens");
+  assert.equal(tokens(1500), "1.5K tokens");
+  assert.equal(tokens(999999), "1M tokens");
+});

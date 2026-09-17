@@ -13,7 +13,8 @@ const publicUser = (row) => ({ id: row.id, name: row.name, username: row.usernam
 const clientJson = (row) => ({ id: row.id, teamId: row.team_id, name: row.name, email: row.email, archived: row.archived });
 const projectJson = (row) => ({ id: row.id, teamId: row.team_id, clientId: row.client_id, name: row.name, code: row.code, color: row.color, billable: row.billable, rate: Number(row.rate), budgetHours: Number(row.budget_hours), archived: row.archived });
 const memberJson = (row) => ({ id: row.id, userId: row.user_id, name: row.name, username: row.username, role: row.role });
-const entryJson = (row) => row ? ({ id: row.id, teamId: row.team_id, userId: row.user_id, projectId: row.project_id, task: row.task, notes: row.notes, date: typeof row.date === 'string' ? row.date.slice(0, 10) : new Date(row.date).toISOString().slice(0, 10), durationSeconds: Number(row.duration_seconds), startedAt: iso(row.started_at), billable: row.billable, status: row.status, version: row.version }) : null;
+const agentJson = (row) => row.agent_tokens === null || row.agent_tokens === undefined ? null : { tokens: Number(row.agent_tokens), cost: Number(row.agent_cost), model: row.agent_model };
+const entryJson = (row) => row ? ({ id: row.id, teamId: row.team_id, userId: row.user_id, projectId: row.project_id, task: row.task, notes: row.notes, date: typeof row.date === 'string' ? row.date.slice(0, 10) : new Date(row.date).toISOString().slice(0, 10), durationSeconds: Number(row.duration_seconds), startedAt: iso(row.started_at), billable: row.billable, status: row.status, agent: agentJson(row), version: row.version }) : null;
 
 function string(value, name, { min = 0, max = 200, fallback } = {}) {
   if (value === undefined && fallback !== undefined) return fallback;
@@ -42,6 +43,16 @@ function date(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value || value < '2000-01-01' || value > '2100-12-31') fail(400, 'invalid_input', 'Date must be a valid YYYY-MM-DD date between 2000 and 2100.');
   return value;
 }
+// Agents report their own usage; Crops stores it and never meters anything.
+function agent(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !['tokens', 'cost', 'model'].includes(key))) fail(400, 'invalid_input', 'Agent usage must be null or an object with tokens, cost, and an optional model.');
+  const cost = number(value.cost, 'Agent cost');
+  if (Math.abs(Math.round(cost * 100) - cost * 100) > 1e-6) fail(400, 'invalid_input', 'Agent cost must be a USD amount with at most two decimal places.');
+  const model = value.model === undefined || value.model === null ? null : string(value.model, 'Agent model', { max: 100 }) || null;
+  return { tokens: number(value.tokens, 'Agent tokens', 1e12, true), cost: Math.round(cost * 100) / 100, model };
+}
+const agentValues = (usage) => [usage?.tokens ?? null, usage?.cost ?? null, usage?.model ?? null];
 function role(value = 'member') {
   if (!['admin', 'member'].includes(value)) fail(400, 'invalid_input', 'Role must be admin or member.');
   return value;
@@ -91,9 +102,12 @@ async function editableEntry(tx, id, user) {
   if (!row) fail(404, 'not_found', 'Time entry not found.');
   return { row, member };
 }
-async function stopEntry(tx, row) {
-  if (!row.started_at) return row;
-  return one(tx, `UPDATE entries SET duration_seconds=duration_seconds+GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (clock_timestamp()-started_at)))::integer), started_at=NULL, version=version+1 WHERE id=$1 RETURNING *`, [row.id]);
+async function stopEntry(tx, row, usage) {
+  const setAgent = usage !== undefined && JSON.stringify(agentJson(row)) !== JSON.stringify(usage);
+  if (!row.started_at && !setAgent) return row;
+  if (setAgent && row.status !== 'unbilled') fail(409, 'entry_locked', 'This entry is locked. An admin must first mark it unbilled.');
+  // GREATEST ignores the NULL elapsed time of an already-stopped entry.
+  return one(tx, `UPDATE entries SET duration_seconds=duration_seconds+GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (clock_timestamp()-started_at)))::integer), started_at=NULL${setAgent ? ',agent_tokens=$2,agent_cost=$3,agent_model=$4' : ''}, version=version+1 WHERE id=$1 RETURNING *`, [row.id, ...(setAgent ? agentValues(usage) : [])]);
 }
 
 async function authThrottle(db, ip, account) {
@@ -273,6 +287,7 @@ export function createApi(options = {}) {
           // FK KEY SHARE locks held by concurrent idempotency/session inserts.
           await tx.query('SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE', [user.id]);
           await membership(tx, teamId, user.id); // Removal may have completed while this timer waited.
+          const usage = own(body, 'agent') ? agent(body.agent) : undefined;
           let entry;
           if (body.entryId) {
             entry = await one(tx, 'SELECT * FROM entries WHERE id=$1 AND user_id=$2 AND team_id=$3 FOR UPDATE', [body.entryId, user.id, teamId]);
@@ -280,20 +295,20 @@ export function createApi(options = {}) {
             if (entry.status !== 'unbilled') fail(409, 'entry_locked', 'Invoiced or paid time cannot be restarted.');
             checkVersion(body.version, entry, true);
             await validProject(tx, entry.project_id, teamId);
-            if (entry.started_at) return { entry: entryJson(entry) };
+            if (entry.started_at) return { entry: entryJson(usage === undefined || JSON.stringify(agentJson(entry)) === JSON.stringify(usage) ? entry : await one(tx, 'UPDATE entries SET agent_tokens=$2,agent_cost=$3,agent_model=$4,version=version+1 WHERE id=$1 RETURNING *', [entry.id, ...agentValues(usage)])) };
           }
           const project = await validProject(tx, entry?.project_id || body.projectId, teamId);
           const running = await one(tx, 'SELECT * FROM entries WHERE user_id=$1 AND started_at IS NOT NULL FOR UPDATE', [user.id]);
           if (running) await stopEntry(tx, running);
-          if (entry) entry = await one(tx, 'UPDATE entries SET started_at=clock_timestamp(),version=version+1 WHERE id=$1 RETURNING *', [entry.id]);
-          else entry = await one(tx, 'INSERT INTO entries(id,team_id,user_id,project_id,task,notes,date,billable,started_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()) RETURNING *', [randomUUID(), teamId, user.id, project.id, string(body.task, 'Task', { max: 200, fallback: '' }), string(body.notes, 'Notes', { max: 4000, fallback: '' }), date(body.date || new Date().toISOString().slice(0, 10)), bool(body.billable, 'Billable', project.billable)]);
+          if (entry) entry = await one(tx, `UPDATE entries SET started_at=clock_timestamp()${usage === undefined ? '' : ',agent_tokens=$2,agent_cost=$3,agent_model=$4'},version=version+1 WHERE id=$1 RETURNING *`, [entry.id, ...(usage === undefined ? [] : agentValues(usage))]);
+          else entry = await one(tx, 'INSERT INTO entries(id,team_id,user_id,project_id,task,notes,date,billable,started_at,agent_tokens,agent_cost,agent_model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11) RETURNING *', [randomUUID(), teamId, user.id, project.id, string(body.task, 'Task', { max: 200, fallback: '' }), string(body.notes, 'Notes', { max: 4000, fallback: '' }), date(body.date || new Date().toISOString().slice(0, 10)), bool(body.billable, 'Billable', project.billable), ...agentValues(usage)]);
           return { entry: entryJson(entry) };
         }
         if (path === '/timer/stop' && request.method === 'POST') {
           const { row } = await editableEntry(tx, string(body.entryId, 'Entry ID', { min: 1, max: 80 }), user);
           if (row.user_id !== user.id) fail(403, 'entry_access_denied', 'You can only stop your own timer.');
           checkVersion(body.version, row, true);
-          return { entry: entryJson(await stopEntry(tx, row)) };
+          return { entry: entryJson(await stopEntry(tx, row, own(body, 'agent') ? agent(body.agent) : undefined)) };
         }
         if (path === '/entries' && request.method === 'POST') {
           const teamId = string(body.teamId, 'Team ID', { min: 1, max: 80 });
@@ -302,7 +317,7 @@ export function createApi(options = {}) {
           if (userId !== user.id && member.role !== 'admin') fail(403, 'admin_required', 'An admin is required to enter another member’s time.');
           await membership(tx, teamId, userId);
           const project = await validProject(tx, body.projectId, teamId);
-          const entry = await one(tx, 'INSERT INTO entries(id,team_id,user_id,project_id,task,notes,date,duration_seconds,billable) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [randomUUID(), teamId, userId, project.id, string(body.task, 'Task', { max: 200, fallback: '' }), string(body.notes, 'Notes', { max: 4000, fallback: '' }), date(body.date), number(body.durationSeconds, 'Duration', 604800, true), bool(body.billable, 'Billable', project.billable)]);
+          const entry = await one(tx, 'INSERT INTO entries(id,team_id,user_id,project_id,task,notes,date,duration_seconds,billable,agent_tokens,agent_cost,agent_model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *', [randomUUID(), teamId, userId, project.id, string(body.task, 'Task', { max: 200, fallback: '' }), string(body.notes, 'Notes', { max: 4000, fallback: '' }), date(body.date), number(body.durationSeconds, 'Duration', 604800, true), bool(body.billable, 'Billable', project.billable), ...agentValues(own(body, 'agent') ? agent(body.agent) : null)]);
           return { entry: entryJson(entry) };
         }
         const entryMatch = path.match(/^\/entries\/([^/]+)$/);
@@ -315,7 +330,7 @@ export function createApi(options = {}) {
             return { ok: true };
           }
           const keys = Object.keys(body).filter((key) => key !== 'version');
-          const allowed = ['task', 'notes', 'date', 'durationSeconds', 'projectId', 'billable', 'status'];
+          const allowed = ['task', 'notes', 'date', 'durationSeconds', 'projectId', 'billable', 'status', 'agent'];
           if (!keys.length || keys.some((key) => !allowed.includes(key))) fail(400, 'invalid_input', 'Provide valid editable entry fields.');
           if (own(body, 'status') && member.role !== 'admin') fail(403, 'admin_required', 'Only team admins can change billing status.');
           if (row.status !== 'unbilled' && !(keys.length === 1 && keys[0] === 'status' && member.role === 'admin')) fail(409, 'entry_locked', 'This entry is locked. An admin must first mark it unbilled.');
@@ -327,6 +342,7 @@ export function createApi(options = {}) {
           if (own(body, 'durationSeconds')) changes.duration_seconds = number(body.durationSeconds, 'Duration', 604800, true);
           if (own(body, 'projectId')) changes.project_id = (await validProject(tx, body.projectId, row.team_id)).id;
           if (own(body, 'billable')) changes.billable = bool(body.billable, 'Billable');
+          if (own(body, 'agent')) [changes.agent_tokens, changes.agent_cost, changes.agent_model] = agentValues(agent(body.agent));
           if (own(body, 'status')) {
             if (!['unbilled', 'invoiced', 'paid'].includes(body.status)) fail(400, 'invalid_input', 'Billing status must be unbilled, invoiced, or paid.');
             if (body.status !== 'unbilled' && !(changes.billable ?? row.billable)) fail(400, 'not_billable', 'Nonbillable time cannot be marked invoiced or paid.');

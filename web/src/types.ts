@@ -34,6 +34,11 @@ export interface Project {
   budgetHours: number;
   archived: boolean;
 }
+export interface AgentUsage {
+  tokens: number;
+  cost: number;
+  model: string | null;
+}
 export interface Entry {
   id: string;
   teamId: string;
@@ -46,6 +51,7 @@ export interface Entry {
   startedAt: string | null;
   billable: boolean;
   status: BillingStatus;
+  agent?: AgentUsage | null;
   version: number;
 }
 export interface Snapshot {

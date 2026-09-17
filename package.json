@@ -13,6 +13,7 @@
     "dev:api": "node --env-file-if-exists=.env server/dev.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
+    "mcp": "node mcp/crops-mcp.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "build:macos": "bash apps/macos/build.sh",
     "build:android": "bash apps/android/build.sh",

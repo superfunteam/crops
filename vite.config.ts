@@ -41,6 +41,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve("web/index.html"),
+        trailer: resolve("web/trailer/index.html"),
         ...Object.fromEntries(
           Object.keys(POSTS).map((page) => [page, resolve("web", page)]),
         ),

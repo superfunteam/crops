@@ -16,7 +16,10 @@ export function weekDates(s: string) {
     offset = (d.getDay() + 6) % 7;
   return Array.from({ length: 7 }, (_, i) => addDays(s, i - offset));
 }
-export function duration(e: Entry, now: number) {
+export function duration(
+  e: Pick<Entry, "durationSeconds" | "startedAt">,
+  now: number,
+) {
   return (
     e.durationSeconds +
     (e.startedAt
@@ -48,6 +51,20 @@ export function money(n: number) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(n);
+}
+export const tokens = (n: number) =>
+  `${new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(n)} tokens`;
+export const agentLabel = (e: Pick<Entry, "agent">) =>
+  e.agent ? `${tokens(e.agent.tokens)} · ${money(e.agent.cost)}` : "";
+// Billable entries bill hours × rate plus the agent's self-reported cost.
+export function entryAmount(
+  e: Pick<Entry, "billable" | "agent" | "durationSeconds" | "startedAt">,
+  rate: number,
+  now: number,
+) {
+  return e.billable
+    ? (duration(e, now) / 3600) * rate + (e.agent?.cost || 0)
+    : 0;
 }
 export function projectFor(s: Snapshot, id: string) {
   return s.projects.find((p) => p.id === id);
@@ -86,6 +103,8 @@ export function exportCSV(s: Snapshot, entries: Entry[], now: number) {
       "Hours",
       "Billable",
       "Status",
+      "Agent tokens",
+      "Agent cost (USD)",
       "Amount (USD)",
     ]),
     ...entries.map((e) => {
@@ -100,9 +119,9 @@ export function exportCSV(s: Snapshot, entries: Entry[], now: number) {
         decimal(duration(e, now)),
         e.billable ? "Yes" : "No",
         e.status,
-        e.billable
-          ? ((duration(e, now) / 3600) * (p?.rate || 0)).toFixed(2)
-          : "0.00",
+        e.agent?.tokens ?? "",
+        e.agent ? e.agent.cost.toFixed(2) : "",
+        entryAmount(e, p?.rate || 0, now).toFixed(2),
       ]);
     }),
   ];

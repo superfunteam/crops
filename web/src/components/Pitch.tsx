@@ -366,12 +366,12 @@ function PricingSlide() {
 // Blended agent spend for the demo: roughly $13 per million tokens.
 const TOKEN_COST_PER_MILLION = 13;
 const HOURLY_RATE = 150;
-const AGENT_WAYS: [string, boolean][] = [
-  ["REST API", false],
-  ["Agent hooks", false],
-  ["Log after the fact", false],
-  ["MCP server", true],
-  ["Token expenses", true],
+const AGENT_WAYS = [
+  "MCP server",
+  "REST API",
+  "Agent hooks",
+  "Log after the fact",
+  "Token expenses",
 ];
 
 function AgentSlide() {
@@ -389,7 +389,7 @@ function AgentSlide() {
         <div className="pitch-agent-head">
           <span className="live-dot" />
           <span>Northwind · Website refresh</span>
-          <code>hook → timer.start</code>
+          <code>mcp → start_timer</code>
         </div>
         <div className="pitch-agent-row">
           <span>
@@ -412,16 +412,15 @@ function AgentSlide() {
         </div>
       </div>
       <div className="pitch-agent-ways">
-        {AGENT_WAYS.map(([label, soon]) => (
+        {AGENT_WAYS.map((label) => (
           <span key={label} className="pitch-chip">
             {label}
-            {soon && <em>Soon</em>}
           </span>
         ))}
       </div>
       <p className="pitch-fineprint">
-        Start, stop and log time with a bearer token today. Soon, agents can
-        attach the tokens and cost they report to each entry.
+        Agents start and stop timers, log time after the fact, and attach the
+        tokens and cost they report. It all lands on the client’s bill.
       </p>
     </div>
   );

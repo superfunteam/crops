@@ -97,3 +97,27 @@ test('member removal migration preserves historical entries and their remaining 
     await assert.rejects(db.query('DELETE FROM projects WHERE id=$1', [project.id]));
   });
 });
+
+test('agent usage migration adds validated nullable columns and matches the dev schema on replay', async () => {
+  await fixture(async db => {
+    await db.exec(bootstrap);
+    const member = (await db.query('SELECT * FROM memberships')).rows[0];
+    const project = (await db.query('SELECT id FROM projects')).rows[0];
+    await db.query("INSERT INTO entries(id,team_id,user_id,project_id,date,duration_seconds) VALUES('before',$1,$2,$3,'2026-09-16',60)", [member.team_id, member.user_id, project.id]);
+    const usage = await migration('20260916210000_add_agent_usage');
+    await db.exec(usage);
+    await db.exec(usage);
+    const { schema: devSchema } = await import('../db/schema.mjs');
+    await db.exec(devSchema);
+    assert.deepEqual((await db.query("SELECT agent_tokens,agent_cost,agent_model FROM entries WHERE id='before'")).rows, [{ agent_tokens: null, agent_cost: null, agent_model: null }]);
+    await db.query("UPDATE entries SET agent_tokens=2410000,agent_cost=31.40,agent_model='claude-opus-5' WHERE id='before'");
+    const row = (await db.query("SELECT agent_tokens,agent_cost FROM entries WHERE id='before'")).rows[0];
+    assert.equal(Number(row.agent_tokens), 2410000);
+    assert.equal(Number(row.agent_cost), 31.4);
+    for (const invalid of ['agent_tokens=-1', 'agent_cost=-1', 'agent_tokens=NULL', 'agent_cost=NULL', "agent_model=''"]) {
+      await assert.rejects(db.query(`UPDATE entries SET ${invalid} WHERE id='before'`), undefined, invalid);
+    }
+    await db.query("UPDATE entries SET agent_tokens=NULL,agent_cost=NULL,agent_model=NULL WHERE id='before'");
+    assert.equal((await db.query("SELECT COUNT(*)::integer AS count FROM pg_constraint WHERE conname='entries_agent_complete'")).rows[0].count, 1);
+  });
+});

@@ -2950,18 +2950,6 @@ small,
   border: 1px solid #b2c79c26;
   font-size: 11px;
 }
-.pitch-agent-ways em {
-  font-style: normal;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: #c9dba2;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: #b0c68426;
-}
-
 /* Pager */
 .pitch-controls {
   display: flex;

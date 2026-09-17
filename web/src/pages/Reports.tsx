@@ -8,12 +8,14 @@ import type { Crops } from "../useCrops";
 import type { Editor } from "../components/Editors";
 import {
   duration,
+  entryAmount,
   exportCSV,
   money,
   personName,
   projectFor,
   time,
   today,
+  tokens,
 } from "../lib";
 import { Empty, PageHeading, Select, Status } from "../components/UI";
 export function ReportsPage({
@@ -51,13 +53,12 @@ export function ReportsPage({
     amount = (es: Entry[]) =>
       es.reduce(
         (n, e) =>
-          n +
-          (e.billable
-            ? (duration(e, crops.now) / 3600) *
-              (projectFor(s, e.projectId)?.rate || 0)
-            : 0),
+          n + entryAmount(e, projectFor(s, e.projectId)?.rate || 0, crops.now),
         0,
       ),
+    agentEntries = entries.filter((e) => e.billable && e.agent),
+    agentCost = agentEntries.reduce((n, e) => n + (e.agent?.cost || 0), 0),
+    agentTokens = agentEntries.reduce((n, e) => n + (e.agent?.tokens || 0), 0),
     total = sum(entries),
     billableSeconds = sum(entries.filter((e) => e.billable));
   const eligible = entries.filter((e) => !e.startedAt),
@@ -243,7 +244,11 @@ export function ReportsPage({
               <div>
                 <span>Billable value</span>
                 <strong>{money(amount(entries))}</strong>
-                <small>At current project rates</small>
+                <small>
+                  {agentEntries.length
+                    ? `Incl. ${money(agentCost)} agent usage · ${tokens(agentTokens)}`
+                    : "At current project rates"}
+                </small>
               </div>
             </>
           )}
@@ -418,6 +423,8 @@ export function ReportsPage({
                       </button>
                       <div className="muted small truncate" title={e.notes}>
                         {e.task}
+                        {e.agent &&
+                          ` · ${tokens(e.agent.tokens)} · ${money(e.agent.cost)} agent`}
                         {e.notes && ` · ${e.notes}`}
                       </div>
                     </td>
@@ -429,9 +436,7 @@ export function ReportsPage({
                     </td>
                     {billing && (
                       <td className="numeric">
-                        {money(
-                          (duration(e, crops.now) / 3600) * (p?.rate || 0),
-                        )}
+                        {money(entryAmount(e, p?.rate || 0, crops.now))}
                       </td>
                     )}
                     <td>
