@@ -63,7 +63,11 @@ Every paid plan included unlimited clients, projects, and invoices. Harvest's ow
 
 Before the acquisition, Harvest charged a flat rate per seat of roughly $11 (Pro) or $14 (Premium), billed yearly, with no usage fees.
 
-## Login page scenarios
+## Login page
+
+The pricing slide rotates three Harvest bills against Crops at $0: the two-person studio ($948), the 20-person shop ($22,344), and the same two-person studio on the "Unlimited" plan ($19,336). All three come from the real-life scenarios below.
+
+## Two team sizes
 
 Harvest Teams, billed yearly, before tax. Crops costs $0 in both.
 
