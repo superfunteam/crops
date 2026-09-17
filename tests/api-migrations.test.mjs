@@ -121,3 +121,30 @@ test('agent usage migration adds validated nullable columns and matches the dev 
     assert.equal((await db.query("SELECT COUNT(*)::integer AS count FROM pg_constraint WHERE conname='entries_agent_complete'")).rows[0].count, 1);
   });
 });
+
+test('access key migration stores only validated hashes, cascades with users, and matches the dev schema on replay', async () => {
+  await fixture(async db => {
+    await db.exec(bootstrap);
+    const keys = await migration('20260916220000_add_access_keys');
+    await db.exec(keys);
+    await db.exec(keys);
+    const { schema: devSchema } = await import('../db/schema.mjs');
+    await db.exec(devSchema);
+    const user = (await db.query('SELECT id FROM users')).rows[0];
+    const hash = 'a'.repeat(64);
+    await db.query("INSERT INTO access_keys(id,user_id,name,prefix,key_hash) VALUES('key',$1,'Zapier','crops_abcdef',$2)", [user.id, hash]);
+    await assert.rejects(db.query("INSERT INTO access_keys(id,user_id,name,prefix,key_hash) VALUES('dup',$1,'Again','crops_abcdef',$2)", [user.id, hash]));
+    for (const [name, keyHash] of [['', 'b'.repeat(64)], ['x'.repeat(101), 'c'.repeat(64)], ['Plain', 'crops_not-a-hash']]) {
+      await assert.rejects(db.query("INSERT INTO access_keys(id,user_id,name,prefix,key_hash) VALUES($1,$2,$3,'crops_abcdef',$4)", [`bad-${keyHash}`, user.id, name, keyHash]));
+    }
+    const row = (await db.query("SELECT last_used_at,revoked_at,created_at FROM access_keys WHERE id='key'")).rows[0];
+    assert.equal(row.last_used_at, null);
+    assert.equal(row.revoked_at, null);
+    assert.ok(row.created_at);
+    assert.equal((await db.query("SELECT COUNT(*)::integer AS count FROM pg_indexes WHERE indexname='access_keys_hash'")).rows[0].count, 1);
+    assert.equal((await db.query("SELECT relrowsecurity FROM pg_class WHERE relname='access_keys'")).rows[0].relrowsecurity, true);
+    await db.exec('DELETE FROM mutation_requests; DELETE FROM entries; DELETE FROM projects; DELETE FROM clients; DELETE FROM memberships; DELETE FROM teams; DELETE FROM sessions');
+    await db.query('DELETE FROM users WHERE id=$1', [user.id]);
+    assert.equal((await db.query('SELECT id FROM access_keys')).rows.length, 0);
+  });
+});

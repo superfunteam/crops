@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Crops MCP server: stdio JSON-RPC 2.0 (newline-delimited), no dependencies.
-// Env: CROPS_URL (default https://crops.wims.vc), CROPS_TOKEN or CROPS_USERNAME + CROPS_PASSWORD.
+// Env: CROPS_URL (default https://crops.wims.vc), and CROPS_ACCESS_KEY (create one in
+// Crops Settings), or a CROPS_TOKEN session, or CROPS_USERNAME + CROPS_PASSWORD.
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 
@@ -9,7 +10,7 @@ const base = (process.env.CROPS_URL || "https://crops.wims.vc")
   .trim()
   .replace(/\/+$/, "")
   .replace(/\/api$/, "");
-let token = process.env.CROPS_TOKEN || "";
+let token = process.env.CROPS_ACCESS_KEY || process.env.CROPS_TOKEN || "";
 let signingIn;
 
 class ToolError extends Error {}
@@ -33,7 +34,7 @@ async function request(path, method = "GET", body, retry = true) {
     response = await attempt();
   } catch {
     // POST retries reuse the Idempotency-Key, so the server replays one result.
-    if (method === "PATCH")
+    if (method === "PATCH" || method === "DELETE")
       throw new ToolError(`Could not reach Crops at ${base}.`);
     try {
       response = await attempt();
@@ -60,7 +61,7 @@ async function login() {
   const { CROPS_USERNAME: username, CROPS_PASSWORD: password } = process.env;
   if (!username || !password)
     throw new ToolError(
-      "Set CROPS_TOKEN, or CROPS_USERNAME and CROPS_PASSWORD, for the Crops MCP server.",
+      "Set CROPS_ACCESS_KEY (create one in Crops Settings), or CROPS_USERNAME and CROPS_PASSWORD, for the Crops MCP server.",
     );
   let response;
   try {
@@ -102,6 +103,48 @@ async function findProject(projectId) {
   throw new ToolError(
     `Project ${projectId} was not found. Use list_projects to find one.`,
   );
+}
+async function findEntry(entryId) {
+  if (typeof entryId !== "string" || !entryId)
+    throw new ToolError("entryId is required. Use list_entries to find one.");
+  for (const s of await teamStates()) {
+    const entry = s.entries.find((e) => e.id === entryId);
+    if (entry) return { s, entry };
+  }
+  throw new ToolError(
+    `Entry ${entryId} was not found. Use list_entries to find one.`,
+  );
+}
+// Load the entry's current version, and retry once if it changes meanwhile.
+async function withVersion(entryId, change) {
+  for (let tries = 0; ; tries++) {
+    const found = await findEntry(entryId);
+    try {
+      return await change(found);
+    } catch (error) {
+      if (error.code !== "version_conflict" || tries >= 1) throw error;
+    }
+  }
+}
+function isoDate(value, name) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    throw new ToolError(`${name} must be a YYYY-MM-DD date.`);
+  return value;
+}
+function seconds(args, required) {
+  const value =
+    args.durationSeconds !== undefined
+      ? args.durationSeconds
+      : typeof args.durationMinutes === "number"
+        ? Math.round(args.durationMinutes * 60)
+        : args.durationMinutes;
+  if (value === undefined && !required) return undefined;
+  if (!Number.isInteger(value) || value < 0)
+    throw new ToolError(
+      "Provide durationMinutes or durationSeconds as a nonnegative number.",
+    );
+  return value;
 }
 const localDate = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -184,7 +227,7 @@ const tools = [
   {
     name: "list_projects",
     description:
-      "List Crops teams with their clients and active projects, including ids and hourly rates.",
+      "List the teams this account belongs to, with their clients and active projects (ids, billable flags, hourly rates). Call this first to find a projectId.",
     inputSchema: {
       type: "object",
       properties: { includeArchived: { type: "boolean" } },
@@ -213,7 +256,8 @@ const tools = [
   },
   {
     name: "current_timer",
-    description: "Show the running Crops timer for this account, if any.",
+    description:
+      "Show this account's running timer, if any, with project, client, and elapsed seconds. There is at most one running timer per person.",
     inputSchema: { type: "object", properties: {} },
     async run() {
       const s = await request("/state");
@@ -233,7 +277,7 @@ const tools = [
   {
     name: "start_timer",
     description:
-      "Start a Crops timer on a project. Any running timer is stopped first.",
+      "Start a new timer on a project, dated today. Any running timer is stopped first. To continue an existing entry instead, use resume_timer.",
     inputSchema: {
       type: "object",
       properties: {
@@ -259,7 +303,7 @@ const tools = [
   {
     name: "stop_timer",
     description:
-      "Stop the running Crops timer, optionally attaching the agent's token usage and cost.",
+      "Stop this account's running timer, optionally attaching the agent's own token usage and USD cost (replaces the entry's recorded usage).",
     inputSchema: { type: "object", properties: { agent: agentSchema } },
     async run(args) {
       const agent = usage(args.agent);
@@ -279,7 +323,7 @@ const tools = [
   {
     name: "log_time",
     description:
-      "Add a completed Crops time entry, optionally with agent usage.",
+      "Add a completed time entry with a duration (no timer), optionally with agent usage.",
     inputSchema: {
       type: "object",
       properties: {
@@ -296,23 +340,14 @@ const tools = [
       required: ["projectId"],
     },
     async run(args) {
-      const seconds =
-        args.durationSeconds !== undefined
-          ? args.durationSeconds
-          : typeof args.durationMinutes === "number"
-            ? Math.round(args.durationMinutes * 60)
-            : undefined;
-      if (!Number.isInteger(seconds) || seconds < 0)
-        throw new ToolError(
-          "Provide durationMinutes or durationSeconds as a nonnegative number.",
-        );
+      const durationSeconds = seconds(args, true);
       const { s, project } = await findProject(args.projectId);
       const agent = usage(args.agent);
       const { entry } = await request("/entries", "POST", {
         teamId: s.team.id,
         projectId: project.id,
         date: args.date || localDate(),
-        durationSeconds: seconds,
+        durationSeconds,
         ...optional(args, ["task", "notes", "billable"]),
         ...(agent !== undefined ? { agent } : {}),
       });
@@ -322,11 +357,11 @@ const tools = [
   {
     name: "report_agent_usage",
     description:
-      "Attach agent usage to an existing entry. mode add (default) adds to recorded usage; set replaces it.",
+      "Attach agent usage to an existing entry. mode add (default) adds to the recorded usage; set replaces it.",
     inputSchema: {
       type: "object",
       properties: {
-        entryId: { type: "string" },
+        entryId: { type: "string", description: "From list_entries." },
         ...agentSchema.properties,
         mode: { type: "string", enum: ["add", "set"] },
       },
@@ -341,13 +376,7 @@ const tools = [
         { tokens: args.tokens, cost: args.cost, model: args.model },
         "usage",
       );
-      for (let tries = 0; ; tries++) {
-        let found;
-        for (const s of await teamStates()) {
-          const entry = s.entries.find((e) => e.id === args.entryId);
-          if (entry) found = { s, entry };
-        }
-        if (!found) throw new ToolError(`Entry ${args.entryId} was not found.`);
+      return withVersion(args.entryId, async (found) => {
         const previous = args.mode === "set" ? null : found.entry.agent;
         const agent = {
           tokens: (previous?.tokens || 0) + reported.tokens,
@@ -356,20 +385,181 @@ const tools = [
             ? { model: reported.model || previous.model }
             : {}),
         };
-        try {
-          const { entry } = await request(
-            `/entries/${encodeURIComponent(args.entryId)}`,
-            "PATCH",
-            {
-              version: found.entry.version,
-              agent,
-            },
-          );
-          return { updated: true, entry: describe(found.s, entry) };
-        } catch (error) {
-          if (error.code !== "version_conflict" || tries >= 2) throw error;
-        }
-      }
+        const { entry } = await request(
+          `/entries/${encodeURIComponent(args.entryId)}`,
+          "PATCH",
+          { version: found.entry.version, agent },
+        );
+        return { updated: true, entry: describe(found.s, entry) };
+      });
+    },
+  },
+  {
+    name: "list_entries",
+    description:
+      "List time entries (newest first) so you can review, edit, resume, or delete them. Defaults to your own entries from the last 7 days across all your teams. Returns ids and versions for update_entry, delete_entry, and resume_timer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: {
+          type: "string",
+          description: "First date, YYYY-MM-DD. Defaults to 6 days ago.",
+        },
+        to: {
+          type: "string",
+          description:
+            "Last date, YYYY-MM-DD. Defaults to tomorrow (local), so entries dated by a server in a later timezone still appear.",
+        },
+        projectId: { type: "string", description: "Only this project." },
+        teamId: { type: "string", description: "Only this team." },
+        mine: {
+          type: "boolean",
+          description:
+            "Only your own entries (default true). Team admins can pass false to see everyone's.",
+        },
+      },
+    },
+    async run(args) {
+      const to =
+        isoDate(args.to, "to") || localDate(new Date(Date.now() + 86400000));
+      const from =
+        isoDate(args.from, "from") ||
+        localDate(new Date(Date.now() - 6 * 86400000));
+      const states = args.teamId
+        ? [await request(`/state?teamId=${encodeURIComponent(args.teamId)}`)]
+        : await teamStates();
+      const entries = states
+        .flatMap((s) =>
+          s.entries
+            .filter(
+              (e) =>
+                e.date >= from &&
+                e.date <= to &&
+                (!args.projectId || e.projectId === args.projectId) &&
+                (args.mine === false || e.userId === s.user.id),
+            )
+            .map((e) => {
+              const { elapsedSeconds, project, client } = describe(s, e);
+              const person = [...s.members, ...(s.formerMembers || [])].find(
+                (m) => (m.userId || m.id) === e.userId,
+              );
+              return {
+                id: e.id,
+                version: e.version,
+                date: e.date,
+                teamId: e.teamId,
+                projectId: e.projectId,
+                project,
+                client,
+                ...(args.mine === false ? { person: person?.name } : {}),
+                task: e.task,
+                notes: e.notes,
+                durationSeconds: elapsedSeconds,
+                billable: e.billable,
+                status: e.status,
+                running: Boolean(e.startedAt),
+                agent: e.agent ?? null,
+              };
+            }),
+        )
+        .sort((a, b) => b.date.localeCompare(a.date));
+      return {
+        from,
+        to,
+        count: entries.length,
+        entries: entries.slice(0, 200),
+        ...(entries.length > 200
+          ? { note: "Showing the newest 200. Narrow from/to to see more." }
+          : {}),
+      };
+    },
+  },
+  {
+    name: "update_entry",
+    description:
+      "Edit an existing time entry. Send only the fields to change. The current version is fetched automatically. Invoiced or paid entries are locked, and a running timer's date and duration cannot change until it stops.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entryId: { type: "string", description: "From list_entries." },
+        ...entryFields,
+        date: { type: "string", description: "YYYY-MM-DD." },
+        durationMinutes: { type: "number", minimum: 0 },
+        durationSeconds: { type: "integer", minimum: 0 },
+        projectId: {
+          type: "string",
+          description: "Move to another project in the same team.",
+        },
+        agent: {
+          ...agentSchema,
+          type: ["object", "null"],
+          description: "Replace the recorded agent usage, or null to clear it.",
+        },
+      },
+      required: ["entryId"],
+    },
+    async run(args) {
+      const changes = {
+        ...optional(args, ["task", "notes", "billable", "projectId"]),
+        ...(args.date !== undefined
+          ? { date: isoDate(args.date, "date") }
+          : {}),
+      };
+      const durationSeconds = seconds(args, false);
+      if (durationSeconds !== undefined)
+        changes.durationSeconds = durationSeconds;
+      if (args.agent !== undefined) changes.agent = usage(args.agent);
+      if (!Object.keys(changes).length)
+        throw new ToolError("Provide at least one field to change.");
+      return withVersion(args.entryId, async ({ s, entry: current }) => {
+        const { entry } = await request(
+          `/entries/${encodeURIComponent(args.entryId)}`,
+          "PATCH",
+          { ...changes, version: current.version },
+        );
+        return { updated: true, entry: describe(s, entry) };
+      });
+    },
+  },
+  {
+    name: "delete_entry",
+    description:
+      "Permanently delete a stopped, unbilled time entry. Stop a running timer first. Invoiced or paid entries cannot be deleted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entryId: { type: "string", description: "From list_entries." },
+      },
+      required: ["entryId"],
+    },
+    async run(args) {
+      return withVersion(args.entryId, async ({ entry }) => {
+        await request(
+          `/entries/${encodeURIComponent(entry.id)}?version=${entry.version}`,
+          "DELETE",
+        );
+        return { deleted: true, entryId: entry.id };
+      });
+    },
+  },
+  {
+    name: "resume_timer",
+    description:
+      "Restart the timer on one of your existing unbilled entries, adding time to it. Any other running timer is stopped first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entryId: { type: "string", description: "From list_entries." },
+      },
+      required: ["entryId"],
+    },
+    async run(args) {
+      const { s, entry: current } = await findEntry(args.entryId);
+      const { entry } = await request("/timer/start", "POST", {
+        teamId: current.teamId,
+        entryId: current.id,
+      });
+      return { started: true, entry: describe(s, entry) };
     },
   },
 ];
@@ -395,7 +585,7 @@ async function handle(message) {
       capabilities: { tools: {} },
       serverInfo: { name: "crops", title: "Crops", version: "0.1.0" },
       instructions:
-        "Track time in Crops. Use list_projects for ids, start_timer/stop_timer around work, and attach your own token usage and USD cost as agent usage.",
+        "Track time in Crops. Use list_projects for project ids, start_timer/stop_timer around work (or log_time afterwards), and attach your own token usage and USD cost as agent usage. Use list_entries to find existing entries, then update_entry, delete_entry, or resume_timer.",
     });
   if (method.startsWith("notifications/")) return;
   if (method === "ping") return reply({});

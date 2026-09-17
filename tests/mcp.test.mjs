@@ -46,6 +46,7 @@ function startMcp(t, env) {
     env: {
       ...process.env,
       CROPS_TOKEN: "",
+      CROPS_ACCESS_KEY: "",
       CROPS_USERNAME: "",
       CROPS_PASSWORD: "",
       ...env,
@@ -113,11 +114,15 @@ test("MCP server tracks agent time and usage against a real Crops API", async (t
   const { tools } = (await mcp.rpc("tools/list")).result;
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [
     "current_timer",
+    "delete_entry",
+    "list_entries",
     "list_projects",
     "log_time",
     "report_agent_usage",
+    "resume_timer",
     "start_timer",
     "stop_timer",
+    "update_entry",
   ]);
   assert.ok(
     tools.every(
@@ -227,6 +232,136 @@ test("MCP server tracks agent time and usage against a real Crops API", async (t
     requests.filter((r) => r.url === "/api/auth/login").length,
     1,
     "The session token is cached.",
+  );
+
+  const listed = await mcp.call("list_entries", {
+    from: "2026-09-01",
+    to: "2100-01-01",
+  });
+  assert.equal(listed.count, 2);
+  const listedLog = listed.entries.find((e) => e.id === logged.entry.id);
+  assert.deepEqual(Object.keys(listedLog).sort(), [
+    "agent",
+    "billable",
+    "client",
+    "date",
+    "durationSeconds",
+    "id",
+    "notes",
+    "project",
+    "projectId",
+    "running",
+    "status",
+    "task",
+    "teamId",
+    "version",
+  ]);
+  assert.equal(listedLog.project, "General");
+  assert.equal(listedLog.running, false);
+  assert.equal(
+    (
+      await mcp.call("list_entries", {
+        projectId: "missing",
+        from: "2026-09-01",
+      })
+    ).count,
+    0,
+  );
+  assert.match(
+    (await mcp.call("list_entries", { from: "last week" })).error,
+    /YYYY-MM-DD/,
+  );
+
+  // A concurrent edit bumps the version; update_entry refetches and retries.
+  const current = (
+    await (
+      await fetch(`${url}/api/state`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).json()
+  ).entries.find((e) => e.id === logged.entry.id);
+  await fetch(`${url}/api/entries/${logged.entry.id}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ version: current.version, task: "Elsewhere" }),
+  });
+  const updated = await mcp.call("update_entry", {
+    entryId: logged.entry.id,
+    notes: "Edited by an agent",
+    durationMinutes: 30,
+    agent: null,
+  });
+  assert.equal(updated.entry.notes, "Edited by an agent");
+  assert.equal(updated.entry.task, "Elsewhere");
+  assert.equal(updated.entry.durationSeconds, 1800);
+  assert.equal(updated.entry.agent, null);
+  assert.match(
+    (await mcp.call("update_entry", { entryId: logged.entry.id })).error,
+    /at least one field/,
+  );
+  assert.match(
+    (await mcp.call("update_entry", { entryId: "missing", task: "x" })).error,
+    /not found/,
+  );
+
+  const resumed = await mcp.call("resume_timer", { entryId: logged.entry.id });
+  assert.equal(resumed.entry.id, logged.entry.id);
+  assert.ok(resumed.entry.startedAt);
+  assert.equal(
+    (
+      await mcp.call("list_entries", { from: "2026-09-01", to: "2100-01-01" })
+    ).entries.find((e) => e.id === logged.entry.id).running,
+    true,
+  );
+  assert.match(
+    (await mcp.call("delete_entry", { entryId: logged.entry.id })).error,
+    /Stop this timer/,
+  );
+  await mcp.call("stop_timer");
+  assert.deepEqual(
+    await mcp.call("delete_entry", { entryId: logged.entry.id }),
+    { deleted: true, entryId: logged.entry.id },
+  );
+  assert.equal(
+    (await mcp.call("list_entries", { from: "2026-09-01", to: "2100-01-01" }))
+      .count,
+    1,
+  );
+
+  const created = await (
+    await fetch(`${url}/api/access-keys`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "MCP" }),
+    })
+  ).json();
+  const byKey = startMcp(t, {
+    CROPS_URL: url,
+    CROPS_ACCESS_KEY: created.secret,
+    CROPS_TOKEN: "ignored-when-a-key-is-set",
+  });
+  assert.equal(
+    (await byKey.call("list_projects"))[0].projects[0].id,
+    projectId,
+  );
+  assert.ok(
+    requests.some(
+      (r) => r.headers.get("authorization") === `Bearer ${created.secret}`,
+    ),
+  );
+  const revokedKey = startMcp(t, {
+    CROPS_URL: url,
+    CROPS_ACCESS_KEY: `crops_${"z".repeat(43)}`,
+  });
+  assert.match(
+    (await revokedKey.call("list_projects")).error,
+    /invalid or has been revoked/,
   );
 
   const byToken = startMcp(t, { CROPS_URL: url, CROPS_TOKEN: token });

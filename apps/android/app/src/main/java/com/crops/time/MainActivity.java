@@ -51,6 +51,8 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private String projectId = "", draftTask = "", draftNotes = "", screenSignature = "";
     private boolean billable = true, register, resumed, loginView;
     private int tab;
+    /** The currently open entry dialog, if any; package-visible for the instrumentation suite. */
+    AlertDialog entryDialog, confirmDialog;
     private LocalDate date = LocalDate.now();
     private final Handler handler = new Handler();
     private final Runnable tick = new Runnable() {
@@ -70,7 +72,12 @@ public final class MainActivity extends Activity implements Repository.Listener 
     }
     @Override protected void onResume() { super.onResume(); resumed = true; handler.post(tick); handler.post(refresh); ensureService(); }
     @Override protected void onPause() { resumed = false; handler.removeCallbacksAndMessages(null); super.onPause(); }
-    @Override protected void onDestroy() { repo.removeListener(this); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        repo.removeListener(this);
+        if (confirmDialog != null) confirmDialog.dismiss();
+        if (entryDialog != null) entryDialog.dismiss();
+        super.onDestroy();
+    }
     @Override protected void onSaveInstanceState(Bundle saved) {
         captureDraft(); saved.putInt("tab", tab); saved.putString("projectId", projectId); saved.putString("task", draftTask); saved.putString("notes", draftNotes);
         saved.putBoolean("billable", billable); saved.putString("date", date.toString()); super.onSaveInstanceState(saved);
@@ -219,7 +226,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         Button notifications = button("Notification settings", BG, GREEN); notifications.setOnClickListener(v -> startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()))); margin(page, notifications, 12);
         Button syncNow = button("Sync now", BG, GREEN); syncNow.setOnClickListener(v -> repo.refresh()); margin(page, syncNow, 4);
         Button signOut = button("Sign out", Color.WHITE, 0xFFA23831); signOut.setOnClickListener(v -> { if (repo.running() != null) Toast.makeText(this, "Your timer continues in your workspace.", Toast.LENGTH_LONG).show(); stopService(new Intent(this, TimerService.class)); repo.logout(); }); margin(page, signOut, 22);
-        margin(page, text("CROPS  1.0.1\nNative, simple, and made for your team.", 12, MUTED, false), 30);
+        margin(page, text("CROPS  1.1.0\nNative, simple, and made for your team.", 12, MUTED, false), 30);
     }
     private void fillEntries(LocalDate target, int limit) {
         JSONArray all = repo.array("entries"); int count = 0;
@@ -229,20 +236,36 @@ public final class MainActivity extends Activity implements Repository.Listener 
             if (entry == null || !target.toString().equals(entry.optString("date")) || !userId.equals(entry.optString("userId"))) continue;
             if (++count > limit) continue;
             LinearLayout card = card(Color.WHITE); margin(entries, card, 8);
+            boolean isRunning = running(entry);
+            String status = entry.optString("status", "unbilled");
+            boolean locked = !"unbilled".equals(status);
+            String project = repo.projectName(entry.optString("projectId")), task = entry.optString("task", "General").isEmpty() ? "General" : entry.optString("task", "General");
+            String label = isRunning ? "●  Tracking" : "paid".equals(status) ? "✓  Paid" : "invoiced".equals(status) ? "Invoiced" : entry.optBoolean("billable") ? "Billable · Unbilled" : "Non-billable";
+            String agent = Repository.agentLabel(entry);
+            // The whole card opens the entry; the explicit Edit/View button below is the labelled, 48dp target.
+            card.setClickable(true); card.setFocusable(true); card.setOnClickListener(v -> editDialog(entry));
+            card.setForeground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), null, shape(Color.WHITE, 20, 0)));
+            card.setContentDescription(project + ", " + task + ", " + spoken(repo.duration(entry)) + ", " + label.replace("●", "").replace("✓", "").trim()
+                + (agent.isEmpty() ? "" : ", agent usage " + agent) + (locked ? ". Opens read-only details" : ". Opens editor"));
             LinearLayout row = row(); row.setGravity(Gravity.CENTER_VERTICAL); card.addView(row);
             LinearLayout details = column(); row.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
-            details.addView(text(repo.projectName(entry.optString("projectId")), 16, INK, true));
-            margin(details, text(entry.optString("task", "General"), 13, MUTED, false), 5);
-            boolean isRunning = !entry.isNull("startedAt") && !entry.optString("startedAt").isEmpty();
+            details.addView(text(project, 16, INK, true));
+            margin(details, text(task, 13, MUTED, false), 5);
             TextView duration = text(Repository.clock(repo.duration(entry)), 16, GREEN, true); duration.setTag(entry); row.addView(duration);
-            String status = entry.optString("status", "unbilled");
+            if (!agent.isEmpty()) {
+                TextView usage = text(agent, 11, GREEN, true); usage.setBackground(shape(0xFFEAF0DF, 8, 0)); usage.setPadding(dp(8), dp(3), dp(8), dp(3));
+                String model = Repository.agentModel(entry); usage.setContentDescription("Agent usage " + agent + (model.isEmpty() ? "" : ", model " + model));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.topMargin = dp(7); details.addView(usage, lp);
+            }
             LinearLayout footer = row(); footer.setGravity(Gravity.CENTER_VERTICAL); margin(card, footer, 9);
-            String label = isRunning ? "●  Tracking" : "paid".equals(status) ? "✓  Paid" : "invoiced".equals(status) ? "Invoiced" : entry.optBoolean("billable") ? "Billable · Unbilled" : "Non-billable";
             footer.addView(text(label, 11, MUTED, false), new LinearLayout.LayoutParams(0, -2, 1));
-            if (!isRunning && "unbilled".equals(status)) {
-                Button resume = button("▶ Resume", Color.WHITE, GREEN); resume.setTextSize(12); resume.setMinHeight(0); footer.addView(resume, new LinearLayout.LayoutParams(-2, dp(38)));
+            if (!isRunning && !locked) {
+                Button resume = button("▶ Resume", Color.WHITE, GREEN); resume.setTextSize(12); resume.setContentDescription("Resume " + task + " on " + project); footer.addView(resume, new LinearLayout.LayoutParams(-2, dp(48)));
                 resume.setEnabled(!repo.busy); resume.setOnClickListener(v -> { requestNotifications(); repo.start(entry.optString("projectId"), entry.optString("task", "General"), entry.optString("notes"), entry.optBoolean("billable"), entry.optString("id")); });
             }
+            Button edit = button(locked ? "View" : "✎ Edit", Color.WHITE, GREEN); edit.setTextSize(12); edit.setMinWidth(dp(64));
+            edit.setContentDescription((locked ? "View " : "Edit ") + task + " on " + project); edit.setOnClickListener(v -> editDialog(entry));
+            footer.addView(edit, new LinearLayout.LayoutParams(-2, dp(48)));
             if (!entry.optString("notes").isEmpty()) margin(card, text(entry.optString("notes"), 12, MUTED, false), 5);
         }
         if (count == 0) {
@@ -300,15 +323,130 @@ public final class MainActivity extends Activity implements Repository.Listener 
             if (repo.busy) { Toast.makeText(this, "Finishing your previous change. Try again in a moment.", Toast.LENGTH_SHORT).show(); return; }
             if (!repo.signedIn()) { Toast.makeText(this, "Sign in again before saving time.", Toast.LENGTH_SHORT).show(); return; }
             try {
-                String value = duration.getText().toString().trim();
-                if (!value.matches("\\d{1,2}:[0-5]\\d")) throw new Exception("Use hours:minutes, for example 1:30.");
-                String[] parts = value.split(":"); long seconds = Long.parseLong(parts[0]) * 3600 + Long.parseLong(parts[1]) * 60;
-                if (seconds <= 0 || seconds > 86400) throw new Exception("Enter a duration between 0:01 and 24:00.");
+                long seconds = parseDuration(duration.getText().toString());
                 JSONObject selected = manualProjects.get(project.getSelectedItemPosition());
                 repo.manual(selected.optString("id"), task.getText().toString().trim().isEmpty() ? "General" : task.getText().toString(), notes.getText().toString(), selectedDate[0].toString(), seconds, billable.isChecked()); dialog.dismiss();
             } catch (Exception invalid) { duration.setError(invalid.getMessage()); }
         })); dialog.show();
     }
+    /** The single hours:minutes parser shared by manual entry and editing. */
+    static long parseDuration(String text) throws Exception {
+        String value = text.trim();
+        if (!value.matches("\\d{1,2}:[0-5]\\d")) throw new Exception("Use hours:minutes, for example 1:30.");
+        String[] parts = value.split(":"); long seconds = Long.parseLong(parts[0]) * 3600 + Long.parseLong(parts[1]) * 60;
+        if (seconds <= 0 || seconds > 86400) throw new Exception("Enter a duration between 0:01 and 24:00.");
+        return seconds;
+    }
+    static String hoursMinutes(long seconds) { return String.format(Locale.US, "%d:%02d", seconds / 3600, seconds / 60 % 60); }
+    private static String spoken(long seconds) { return (seconds / 3600) + " hours " + (seconds / 60 % 60) + " minutes"; }
+    private static boolean running(JSONObject entry) { return !entry.isNull("startedAt") && !entry.optString("startedAt").isEmpty(); }
+    private void editDialog(JSONObject entry) {
+        if (entryDialog != null && entryDialog.isShowing()) return;
+        final String entryId = entry.optString("id"); final int version = entry.optInt("version");
+        final boolean isRunning = running(entry);
+        final String status = entry.optString("status", "unbilled");
+        final boolean locked = !"unbilled".equals(status);
+        final String originalProject = entry.optString("projectId"), originalTask = entry.optString("task").trim(), originalNotes = entry.optString("notes").trim();
+        final String originalDuration = hoursMinutes(entry.optLong("durationSeconds"));
+        final LocalDate originalDate; LocalDate parsed; try { parsed = LocalDate.parse(entry.optString("date")); } catch (Exception invalid) { parsed = LocalDate.now(); } originalDate = parsed;
+        populateProjectOptions();
+        List<JSONObject> projects = new ArrayList<>(projectOptions); boolean listed = false;
+        for (JSONObject p : projects) if (p.optString("id").equals(originalProject)) listed = true;
+        if (!listed) try {
+            // Keep an archived (or unknown) current project visible; it is only sent if the user picks another.
+            JSONObject known = repo.project(originalProject);
+            projects.add(0, new JSONObject().put("id", originalProject).put("name", (known == null ? "Project" : known.optString("name", "Project")) + (known != null && known.optBoolean("archived") ? " (archived)" : "")));
+        } catch (Exception ignored) {}
+
+        LinearLayout content = column(); content.setPadding(dp(24), dp(10), dp(24), dp(5));
+        if (locked) notice(content, ("paid".equals(status) ? "This time is marked paid" : "This time is invoiced") + ", so it is locked. A team admin can mark it unbilled in the web workspace before it can be changed or deleted.");
+        else if (isRunning) notice(content, "This timer is running. Stop it to change its date or duration. Project, task, notes, and billable can change now.");
+        Spinner project = projectPicker(content, projects, originalProject);
+        EditText task = field(content, "Task", "What did you work on?", entry.optString("task"), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        EditText duration = field(content, "Duration (hours:minutes)", "1:30", isRunning ? hoursMinutes(repo.duration(entry)) : originalDuration, InputType.TYPE_CLASS_DATETIME | InputType.TYPE_DATETIME_VARIATION_TIME);
+        final LocalDate[] selectedDate = { originalDate };
+        Button dateButton = button(originalDate.format(DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")), BG, GREEN); margin(content, dateButton, 12);
+        dateButton.setContentDescription("Date, " + originalDate.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")));
+        dateButton.setOnClickListener(v -> new DatePickerDialog(this, (picker, y, m, d) -> {
+            selectedDate[0] = LocalDate.of(y, m+1, d); show(dateButton, selectedDate[0].format(DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")));
+            dateButton.setContentDescription("Date, " + selectedDate[0].format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")));
+        }, selectedDate[0].getYear(), selectedDate[0].getMonthValue()-1, selectedDate[0].getDayOfMonth()).show());
+        if (isRunning && !locked) { disable(duration); disable(dateButton); margin(content, text("Stop the timer to edit duration and date.", 12, MUTED, false), 6); }
+        EditText notes = field(content, "Notes", "Optional context", entry.optString("notes"), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        CheckBox billableBox = check("Billable time", entry.optBoolean("billable")); billableBox.setMinHeight(dp(48)); margin(content, billableBox, 8);
+        String agent = Repository.agentLabel(entry);
+        if (!agent.isEmpty()) { String model = Repository.agentModel(entry); margin(content, text("Agent usage: " + agent + (model.isEmpty() ? "" : " · " + model), 12, MUTED, false), 8); }
+        TextView failure = text("", 13, 0xFFA23831, false); failure.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); margin(content, failure, 8);
+        if (locked) for (View v : new View[]{ project, task, duration, dateButton, notes, billableBox }) disable(v);
+        ScrollView scroll = new ScrollView(this); scroll.addView(content);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle(locked ? "Time entry" : "Edit time").setView(scroll);
+        if (locked) builder.setPositiveButton("Close", null);
+        else {
+            builder.setNegativeButton("Cancel", null).setPositiveButton("Save changes", null);
+            if (!isRunning) builder.setNeutralButton("Delete", null);
+        }
+        AlertDialog dialog = builder.create(); entryDialog = dialog;
+        dialog.setOnDismissListener(d -> { if (entryDialog == dialog) entryDialog = null; });
+        if (!locked) dialog.setOnShowListener(d -> {
+            Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE), delete = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            if (delete != null) { delete.setTextColor(0xFFA23831); delete.setContentDescription("Delete this time entry"); }
+            Repository.Result finish = (saved, code, message) -> {
+                if (saved) { dialog.dismiss(); return; }
+                if (code == 404 || code == 409) {
+                    // State was refetched; the displayed version is stale, so do not offer a resend of this revision.
+                    show(failure, message + " Close and reopen this entry to edit the latest version.");
+                    save.setEnabled(false); if (delete != null) delete.setEnabled(false);
+                } else { show(failure, message); save.setEnabled(true); show(save, "Save changes"); if (delete != null) delete.setEnabled(true); }
+            };
+            save.setOnClickListener(v -> {
+                if (repo.busy) { show(failure, "Finishing your previous change. Try again in a moment."); return; }
+                if (!repo.signedIn()) { show(failure, "Sign in again before saving time."); return; }
+                JSONObject changes = new JSONObject();
+                try {
+                    int position = project.getSelectedItemPosition();
+                    String selectedProject = position >= 0 && position < projects.size() ? projects.get(position).optString("id") : originalProject;
+                    if (!selectedProject.equals(originalProject)) changes.put("projectId", selectedProject);
+                    String taskValue = task.getText().toString().trim();
+                    if (!taskValue.equals(originalTask)) changes.put("task", taskValue.isEmpty() ? "General" : taskValue);
+                    String notesValue = notes.getText().toString().trim();
+                    if (!notesValue.equals(originalNotes)) changes.put("notes", notesValue);
+                    if (billableBox.isChecked() != entry.optBoolean("billable")) changes.put("billable", billableBox.isChecked());
+                    if (!isRunning) {
+                        if (!selectedDate[0].equals(originalDate)) changes.put("date", selectedDate[0].toString());
+                        String durationValue = duration.getText().toString().trim();
+                        // An untouched field is never re-sent, so seconds below the displayed minute are preserved.
+                        if (!durationValue.equals(originalDuration)) {
+                            try { changes.put("durationSeconds", parseDuration(durationValue)); }
+                            catch (Exception invalid) { duration.setError(invalid.getMessage()); duration.requestFocus(); return; }
+                        }
+                    }
+                } catch (Exception invalid) { show(failure, "Could not prepare this change."); return; }
+                if (changes.length() == 0) { dialog.dismiss(); return; }
+                show(failure, ""); save.setEnabled(false); show(save, "Saving…"); if (delete != null) delete.setEnabled(false);
+                repo.edit(entryId, version, changes, finish);
+            });
+            if (delete != null) delete.setOnClickListener(v -> {
+                String summary = repo.projectName(originalProject) + " · " + (originalTask.isEmpty() ? "General" : originalTask) + " · " + originalDuration + " on " + originalDate.format(DateTimeFormatter.ofPattern("MMM d, yyyy"));
+                confirmDialog = new AlertDialog.Builder(this).setTitle("Delete this time?").setMessage(summary + "\n\nThis permanently removes the entry for everyone on your team.")
+                    .setNegativeButton("Keep", null).setPositiveButton("Delete", (c, which) -> {
+                        if (repo.busy) { show(failure, "Finishing your previous change. Try again in a moment."); return; }
+                        show(failure, ""); save.setEnabled(false); delete.setEnabled(false); show(delete, "Deleting…");
+                        repo.delete(entryId, version, (saved, code, message) -> { show(delete, "Delete"); finish.done(saved, code, message); });
+                    }).create();
+                confirmDialog.setOnDismissListener(c -> confirmDialog = null);
+                confirmDialog.show();
+                Button confirm = confirmDialog.getButton(AlertDialog.BUTTON_POSITIVE); if (confirm != null) confirm.setTextColor(0xFFA23831);
+            });
+        });
+        dialog.show();
+    }
+    private void notice(LinearLayout parent, String message) {
+        TextView view = text(message, 13, GREEN, false); view.setBackground(shape(0xFFEAF0DF, 12, 0)); view.setPadding(dp(12), dp(10), dp(12), dp(10)); margin(parent, view, 8);
+    }
+    /** English-only UI copy, like the rest of this dependency-free interface. */
+    private static void show(TextView view, CharSequence value) { view.setText(value); }
+    private void disable(View view) { view.setEnabled(false); view.setAlpha(0.55f); }
     private void requestNotifications() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 42);

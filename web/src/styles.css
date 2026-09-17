@@ -1417,6 +1417,81 @@ small,
   margin-top: 15px;
   max-width: 90ch;
 }
+.access-key-reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 18px 0 10px;
+  padding: 21px;
+  background: #f7f8f2;
+  border-radius: 8px;
+}
+.access-key-reveal h3 {
+  font-size: 13px;
+}
+.access-key-reveal p {
+  font-size: 12px;
+  color: #707b64;
+  margin-top: 4px;
+  max-width: 70ch;
+}
+.access-key-snippet {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.access-key-snippet > div {
+  min-width: 0;
+}
+.access-key-snippet span {
+  font-size: 12px;
+  font-weight: 500;
+  color: #566645;
+}
+.access-key-snippet code,
+.access-key-prefix {
+  font-family: monospace;
+  color: #65774f;
+  font-size: 13px;
+  word-break: break-all;
+}
+.access-key-snippet code {
+  display: block;
+  margin-top: 6px;
+}
+.access-key-empty {
+  color: #707b64;
+  font-size: 13px;
+  padding: 10px 0 16px;
+}
+.access-key-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+.access-key-form .field {
+  flex: 1;
+  max-width: 360px;
+}
+@media (max-width: 640px) {
+  .access-key-snippet,
+  .access-key-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .access-key-form .field {
+    max-width: none;
+  }
+  .access-key-reveal {
+    padding: 16px;
+  }
+}
 .about-crops {
   display: flex;
   align-items: center;

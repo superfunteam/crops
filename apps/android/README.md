@@ -17,8 +17,11 @@ For development, run the root API server on port **8787**. An Android emulator c
 - Username/password login, initial workspace registration, Android Keystore encrypted session tokens, logout.
 - Team and project selection; task, notes, billable time; start, stop, and resume entries.
 - Today totals, daily timesheet browsing, manual duration entry, invoiced/paid status visibility.
+- **Edit and delete time.** Tap an entry (or its labelled Edit button) to open the same form used for manual entry: project, task, notes, date, duration (hours:minutes, same parser), and billable. Save sends `PATCH /api/entries/:id` with the displayed version and only the fields you changed, so seconds under the displayed minute are never overwritten. Running entries can change project, task, notes, and billable; duration and date are disabled until stopped. Invoiced or paid entries open read-only with the reason. Stopped unbilled entries can be deleted after a confirmation dialog (`DELETE /api/entries/:id?version=N`).
+- Conflicts stay visible: if the entry changed elsewhere (409) or disappeared (404), Crops refetches state, shows the error in the dialog and sync status, and disables resending that stale revision. Reopen the entry to edit the latest version.
+- Agent usage reported for an entry is shown as a small label such as “2.41M tokens · $31.40” (model in the edit dialog). Missing, null, or malformed usage is ignored.
 - Foreground notification with Android's live chronometer and a Stop timer action.
-- One serialized network queue, unique mutation idempotency keys, server-authoritative timer state, server-clock correction, and conditional state requests that avoid downloading unchanged history. No automatic mutation retry after an ambiguous network outcome.
+- One serialized network queue, unique idempotency keys for creates, version-checked edits and deletes, server-authoritative timer state, server-clock correction, and conditional state requests that avoid downloading unchanged history. No automatic mutation retry after an ambiguous network outcome.
 - Optional **Live cross-device sync** in Settings. A quiet, visible foreground notification checks for timers started on another device even while this app is in the background. Disable it from Settings or the notification's Pause sync action.
 
 Running timers sync about every 5 seconds; enabled idle background sync checks every 15 seconds. Without idle sync, a remotely started timer is discovered when the app is open. Connectivity, Doze, force-stop, and manufacturer battery restrictions can delay synchronization. Elapsed time remains based on the server's start timestamp and does not depend on counting local ticks. After force-stop/reboot, reopen Crops to restore its notification. There is no offline mutation queue: connection failures remain visible.
@@ -42,7 +45,7 @@ For a release candidate, run `./gradlew :app:assembleRelease`; it produces an **
 
 ## Device verification
 
-A dependency-free instrumentation suite checks native registration and login, Keystore persistence, the actual Start button, foreground chronometer and Stop action, stale UI/notification Stop after a remote stop-and-resume, manual entry, resume, and background cross-device start/stop. Use an isolated development database; the suite creates a fresh test account each time.
+A dependency-free instrumentation suite checks native registration and login, Keystore persistence, the actual Start button, foreground chronometer and Stop action, stale UI/notification Stop after a remote stop-and-resume, manual entry, native edit/save and confirmed delete, stale-version edit/delete conflicts, running-entry edit rules, the agent usage label, resume, and background cross-device start/stop. Use an isolated development database; the suite creates a fresh test account each time.
 
 ```sh
 # From the repository root, in another terminal:
@@ -57,6 +60,6 @@ For a USB device, first run `adb reverse tcp:8789 tcp:8789`, then pass `http://1
 
 ## Service/security notes
 
-The manifest declares Android 14+ `specialUse` foreground service permission/type, with a description of the user-visible timer use case. Play Store publication would require review of this service declaration. No location or personal sensor permissions are requested. UI and notification Stop actions are bound to the displayed entry ID and version, so stale controls cannot stop a different timer or the same entry after it has been stopped and resumed elsewhere. Notification action identities also include that version. Session tokens are encrypted with a non-exportable Android Keystore AES-GCM key; app backup and device transfer are excluded.
+The manifest declares Android 14+ `specialUse` foreground service permission/type, with a description of the user-visible timer use case. Play Store publication would require review of this service declaration. No location or personal sensor permissions are requested. UI and notification Stop, edit, and delete actions are bound to the displayed entry ID and version (edits use a real HTTP `PATCH`, which Android's platform `HttpURLConnection` supports; the server has no method-override header), so stale controls cannot stop a different timer or the same entry after it has been stopped and resumed elsewhere. Notification action identities also include that version. Session tokens are encrypted with a non-exportable Android Keystore AES-GCM key; app backup and device transfer are excluded.
 
 Official Android references: [foreground service types](https://developer.android.com/develop/background-work/services/fgs/service-types), [notification permission](https://developer.android.com/develop/ui/views/notifications/notification-permission).

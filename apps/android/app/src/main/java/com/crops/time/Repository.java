@@ -27,6 +27,8 @@ public final class Repository {
     static final String LEGACY_PRODUCTION_SERVER = "https://crops-superfun.netlify.app";
     public interface Listener { void changed(); }
     interface Completion { void done(boolean success); }
+    /** status is the HTTP status of a rejected change, or 0 when no response was received. */
+    interface Result { void done(boolean saved, int status, String message); }
     private final SharedPreferences prefs;
     private final SecureSession session;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -125,21 +127,41 @@ public final class Repository {
     public void manual(String projectId, String task, String notes, String date, long seconds, boolean billable) {
         mutate("/api/entries", object("teamId", teamId(), "projectId", projectId, "task", task.trim(), "notes", notes.trim(), "date", date, "durationSeconds", seconds, "billable", billable));
     }
-    private synchronized void mutate(String path, JSONObject body) {
-        if (busy || !signedIn()) return;
+    /** Edits the displayed revision only. The server rejects the change with 409 if the entry changed since. */
+    public void edit(String entryId, int displayedVersion, JSONObject changes, Result result) {
+        JSONObject body;
+        try { body = new JSONObject(changes.toString()); body.put("version", displayedVersion); } catch (Exception invalid) { throw new IllegalArgumentException(invalid); }
+        mutate("PATCH", "/api/entries/" + segment(entryId), body, result);
+    }
+    /** Deletes the displayed revision only; the version travels in the query string, so no DELETE body is needed. */
+    public void delete(String entryId, int displayedVersion, Result result) {
+        mutate("DELETE", "/api/entries/" + segment(entryId) + "?version=" + displayedVersion, null, result);
+    }
+    private static String segment(String value) {
+        try { return URLEncoder.encode(value, "UTF-8").replace("+", "%20"); } catch (Exception impossible) { throw new IllegalStateException(impossible); }
+    }
+    private void mutate(String path, JSONObject body) { mutate("POST", path, body, null); }
+    private synchronized void mutate(String method, String path, JSONObject body, Result result) {
+        if (busy || !signedIn()) {
+            if (result != null) main.post(() -> result.done(false, 0, signedIn() ? "Finishing your previous change. Try again in a moment." : "Sign in again before saving time."));
+            return;
+        }
         busy = true; error = ""; publish();
-        final String requestId = java.util.UUID.randomUUID().toString();
+        // Only POST creates can be replayed server-side; PATCH and DELETE are guarded by the entry version instead.
+        final String requestId = "POST".equals(method) ? java.util.UUID.randomUUID().toString() : "";
         network.execute(() -> {
-            boolean saved = false;
-            try { request(server(), path, "POST", body, token, requestId); saved = true; fetchState(); }
+            boolean saved = false; int status = 0;
+            try { request(server(), path, method, body, token, requestId); saved = true; status = 200; fetchState(); }
             catch (Exception exception) {
                 handleError(exception);
+                if (exception instanceof ApiException && !saved) status = ((ApiException) exception).status;
                 if (saved) error = "Saved. Waiting to confirm the latest timer: " + error;
                 else if (!(exception instanceof ApiException)) error = "Connection interrupted. Sync before trying again; your change may have reached the server.";
-                // Read after ambiguous outcomes; never retry a timer mutation automatically.
+                // Read after ambiguous outcomes and conflicts; never retry a mutation automatically.
                 if (signedIn()) try { fetchState(); } catch (Exception ignored) {}
             }
             busy = false; publish();
+            if (result != null) { final boolean ok = saved; final int code = status; final String message = error; main.post(() -> result.done(ok, code, message)); }
         });
     }
     public void logout() {
@@ -224,5 +246,31 @@ public final class Repository {
         return seconds;
     }
     private long currentServerMillis() { return serverAtSync == 0 ? System.currentTimeMillis() : serverAtSync + SystemClock.elapsedRealtime() - elapsedAtSync; }
+    /** Tolerant of a missing, null, partial, or malformed agent object: only valid numeric parts are shown. */
+    static String agentLabel(JSONObject entry) {
+        Object raw = entry == null ? null : entry.opt("agent");
+        if (!(raw instanceof JSONObject)) return "";
+        JSONObject agent = (JSONObject) raw; List<String> parts = new ArrayList<>();
+        Object tokens = agent.opt("tokens"), cost = agent.opt("cost");
+        if (tokens instanceof Number && valid(((Number) tokens).doubleValue())) {
+            double value = ((Number) tokens).doubleValue();
+            parts.add(compact(value) + (Math.round(value) == 1 ? " token" : " tokens"));
+        }
+        if (cost instanceof Number && valid(((Number) cost).doubleValue())) parts.add(String.format(java.util.Locale.US, "$%,.2f", ((Number) cost).doubleValue()));
+        return String.join(" · ", parts);
+    }
+    static String agentModel(JSONObject entry) {
+        JSONObject agent = entry == null ? null : entry.optJSONObject("agent");
+        Object model = agent == null ? null : agent.opt("model");
+        return model instanceof String ? ((String) model).trim() : "";
+    }
+    private static boolean valid(double value) { return !Double.isNaN(value) && !Double.isInfinite(value) && value >= 0; }
+    static String compact(double value) {
+        if (value < 1000) return String.valueOf(Math.round(value));
+        String[] units = { "K", "M", "B", "T" }; int unit = -1; double scaled = value;
+        while (unit < units.length - 1 && (unit < 0 || Math.round(scaled * 100) >= 100_000)) { scaled /= 1000; unit++; }
+        String number = String.format(java.util.Locale.US, "%.2f", scaled).replaceAll("0+$", "").replaceAll("\\.$", "");
+        return number + units[unit];
+    }
     public static String clock(long seconds) { return String.format(java.util.Locale.US, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60); }
 }

@@ -192,21 +192,40 @@ enum SessionKeychain {
         guard let seconds = CropsTime.parseDuration(duration), let team = state?.team else { error = "Enter a duration such as 1:30 or 1.5 (up to 24 hours)."; return false }
         return await mutate(path: "/api/entries", body: ["teamId": team.id, "projectId": selectedProject, "task": task.trimmingCharacters(in: .whitespacesAndNewlines), "notes": notes, "date": CropsTime.dateKey(date), "durationSeconds": seconds, "billable": billable])
     }
-    @discardableResult private func mutate(path: String, body: [String: Any]) async -> Bool {
+    /// Saves only the fields that changed, sending the version the form was opened with.
+    func update(entry: Entry, draft: EntryDraft) async -> Bool {
+        guard !busy else { return false }
+        let body: [String: Any]
+        do {
+            guard let changes = try draft.patchBody(for: entry) else { return true }
+            body = changes
+        } catch { self.error = error.localizedDescription; return false }
+        return await mutate(method: "PATCH", path: EntryDraft.path(for: entry), body: body)
+    }
+    func delete(entry: Entry) async -> Bool {
+        guard let userId = state?.user.id, EntryDraft.canDelete(entry, userId: userId) else {
+            error = entry.isRunning ? "Stop this timer before deleting it." : EntryDraft.lockReason(entry) ?? "You can only delete your own time."
+            return false
+        }
+        return await mutate(method: "DELETE", path: EntryDraft.deletePath(for: entry), body: nil)
+    }
+    @discardableResult private func mutate(method: String = "POST", path: String, body: [String: Any]?) async -> Bool {
         guard !busy, let api else { return false }
         busy = true; error = nil; generation += 1
         defer { busy = false }
-        let fingerprint = (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])) ?? Data()
-        let key = uncertainMutation.flatMap { $0.path == path && $0.fingerprint == fingerprint ? $0.key : nil } ?? UUID().uuidString
-        uncertainMutation = (path, fingerprint, key)
+        // POST retries replay through idempotency keys. PATCH/DELETE are protected by their entry version instead.
+        let replayable = method == "POST"
+        let fingerprint = (try? JSONSerialization.data(withJSONObject: body ?? [:], options: [.sortedKeys])) ?? Data()
+        let key = replayable ? uncertainMutation.flatMap { $0.path == path && $0.fingerprint == fingerprint ? $0.key : nil } ?? UUID().uuidString : nil
+        if let key { uncertainMutation = (path, fingerprint, key) }
         do {
-            _ = try await api.request("POST", path: path, body: body, idempotencyKey: key)
-            uncertainMutation = nil
+            _ = try await api.request(method, path: path, body: body, idempotencyKey: key)
+            if replayable { uncertainMutation = nil }
             do { accept(try await api.state(teamId: selectedTeamId)) }
             catch { handle(error); self.error = "Your change was saved. Couldn't refresh the timesheet; sync again when connected." }
             return true
         } catch {
-            if error is APIError { uncertainMutation = nil }
+            if error is APIError && replayable { uncertainMutation = nil }
             handle(error)
             // If a response was lost, refetch canonical state instead of retrying a mutation.
             if signedIn, let value = try? await api.state(teamId: selectedTeamId) { let message = self.error; accept(value); self.error = message }

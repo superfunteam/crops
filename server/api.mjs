@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { createDatabase, productionEnvironment, resolveDatabaseConfig } from './db.mjs';
-import { createSession, digest, hashPassword, needsPasswordUpgrade, sessionCookie, verifyPassword } from './auth.mjs';
+import { createAccessKey, createSession, digest, hashPassword, isAccessKey, needsPasswordUpgrade, sessionCookie, verifyPassword } from './auth.mjs';
 
 class ApiError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, retryAfter) { super(message); this.status = status; this.code = code; this.retryAfter = retryAfter; }
 }
-const fail = (status, code, message) => { throw new ApiError(status, code, message); };
+const fail = (status, code, message, retryAfter) => { throw new ApiError(status, code, message, retryAfter); };
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
 const iso = (value) => value ? new Date(value).toISOString() : null;
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -14,6 +14,8 @@ const clientJson = (row) => ({ id: row.id, teamId: row.team_id, name: row.name, 
 const projectJson = (row) => ({ id: row.id, teamId: row.team_id, clientId: row.client_id, name: row.name, code: row.code, color: row.color, billable: row.billable, rate: Number(row.rate), budgetHours: Number(row.budget_hours), archived: row.archived });
 const memberJson = (row) => ({ id: row.id, userId: row.user_id, name: row.name, username: row.username, role: row.role });
 const agentJson = (row) => row.agent_tokens === null || row.agent_tokens === undefined ? null : { tokens: Number(row.agent_tokens), cost: Number(row.agent_cost), model: row.agent_model };
+const accessKeyJson = (row) => ({ id: row.id, name: row.name, prefix: row.prefix, createdAt: iso(row.created_at), lastUsedAt: iso(row.last_used_at) });
+const pick = (object, keys) => Object.fromEntries(keys.filter((key) => own(object, key)).map((key) => [key, object[key]]));
 const entryJson = (row) => row ? ({ id: row.id, teamId: row.team_id, userId: row.user_id, projectId: row.project_id, task: row.task, notes: row.notes, date: typeof row.date === 'string' ? row.date.slice(0, 10) : new Date(row.date).toISOString().slice(0, 10), durationSeconds: Number(row.duration_seconds), startedAt: iso(row.started_at), billable: row.billable, status: row.status, agent: agentJson(row), version: row.version }) : null;
 
 function string(value, name, { min = 0, max = 200, fallback } = {}) {
@@ -110,18 +112,19 @@ async function stopEntry(tx, row, usage) {
   return one(tx, `UPDATE entries SET duration_seconds=duration_seconds+GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (clock_timestamp()-started_at)))::integer), started_at=NULL${setAgent ? ',agent_tokens=$2,agent_cost=$3,agent_model=$4' : ''}, version=version+1 WHERE id=$1 RETURNING *`, [row.id, ...(setAgent ? agentValues(usage) : [])]);
 }
 
-async function authThrottle(db, ip, account) {
+async function throttle(db, limits, seconds, message) {
   const denied = await db.transaction(async (tx) => {
     await tx.query('DELETE FROM auth_limits WHERE reset_at < now()');
     let exceeded = false;
-    for (const [key, limit] of [[`ip:${ip}`, 100], [`account:${account}`, 15]]) {
-      const row = await one(tx, `INSERT INTO auth_limits(key,count,reset_at) VALUES($1,1,$2) ON CONFLICT(key) DO UPDATE SET count=auth_limits.count+1 RETURNING count`, [digest(key), new Date(Date.now() + 15 * 60000)]);
+    for (const [key, limit] of limits) {
+      const row = await one(tx, `INSERT INTO auth_limits(key,count,reset_at) VALUES($1,1,$2) ON CONFLICT(key) DO UPDATE SET count=auth_limits.count+1 RETURNING count`, [digest(key), new Date(Date.now() + seconds * 1000)]);
       exceeded ||= row.count > limit;
     }
     return exceeded;
   });
-  if (denied) fail(429, 'rate_limited', 'Too many sign-in attempts. Please wait 15 minutes and try again.');
+  if (denied) fail(429, 'rate_limited', message, seconds);
 }
+const authThrottle = (db, ip, account) => throttle(db, [[`ip:${ip}`, 100], [`account:${account}`, 15]], 900, 'Too many sign-in attempts. Please wait 15 minutes and try again.');
 
 export function createApi(options = {}) {
   const env = options.env || process.env;
@@ -156,13 +159,15 @@ export function createApi(options = {}) {
     try {
       if (!originAllowed) fail(403, 'origin_denied', 'This request origin is not allowed.');
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+      const hookMatch = path.match(/^\/hooks(?:\/([^/]+))?$/);
       let body = {};
       if (['POST', 'PATCH', 'DELETE'].includes(request.method)) {
         if (Number(request.headers.get('content-length') || 0) > 65536) fail(413, 'payload_too_large', 'Request body is too large.');
         const raw = await request.text();
         if (Buffer.byteLength(raw, 'utf8') > 65536) fail(413, 'payload_too_large', 'Request body is too large.');
         if (raw) {
-          if ((request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase() !== 'application/json') fail(415, 'json_required', 'Send a JSON request body.');
+          // Webhook senders (Shortcuts, Stream Deck) often cannot set a JSON media type.
+          if (!hookMatch && (request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase() !== 'application/json') fail(415, 'json_required', 'Send a JSON request body.');
           try { body = JSON.parse(raw); } catch { fail(400, 'invalid_json', 'Request body must be valid JSON.'); }
           if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'invalid_json', 'Request body must be a JSON object.');
         }
@@ -208,9 +213,19 @@ export function createApi(options = {}) {
       const bearer = authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/i)?.[1];
       if (authorization && !bearer) fail(401, 'unauthorized', 'The Authorization header is invalid.');
       const cookie = request.headers.get('cookie')?.split(';').map((s) => s.trim()).find((s) => s.startsWith('crops_session='))?.slice(14);
-      const token = bearer || cookie;
+      // A webhook URL carries its access key in the path; keys never come from cookies.
+      const token = hookMatch ? hookMatch[1] || bearer : bearer || cookie;
+      const keyAuth = Boolean(hookMatch || bearer) && isAccessKey(token);
+      if (hookMatch) {
+        if (request.method !== 'POST') fail(405, 'method_not_allowed', 'Webhooks accept POST requests.');
+        await throttle(db, [[`hook-ip:${context.ip || 'unknown'}`, 600], [`hook-key:${digest(String(token))}`, 120]], 60, 'Too many webhook requests. Please wait a minute and try again.');
+        if (!keyAuth) fail(401, 'unauthorized', 'Webhooks require a valid access key in the URL or a Bearer access key.');
+      }
       if (!token || token.length > 256) fail(401, 'unauthorized', 'Sign in to continue.');
-      if (!bearer && cookie && ['POST', 'PATCH', 'DELETE'].includes(request.method) && !origin && request.headers.get('sec-fetch-site') !== 'same-origin') fail(403, 'origin_required', 'Cookie-authenticated changes require a verified same-origin browser request. Native clients should use a Bearer token.');
+      if (keyAuth && (/^\/access-keys(\/[^/]+)?$/.test(path) || ['/auth/password', '/auth/logout'].includes(path) || /^\/members\/[^/]+\/password$/.test(path))) fail(403, 'session_required', 'Access keys cannot manage access keys, passwords, or sessions. Sign in to Crops to do this.');
+      if (!bearer && !hookMatch && cookie && ['POST', 'PATCH', 'DELETE'].includes(request.method) && !origin && request.headers.get('sec-fetch-site') !== 'same-origin') fail(403, 'origin_required', 'Cookie-authenticated changes require a verified same-origin browser request. Native clients should use a Bearer token.');
+      // Record key use at most once a minute, outside the (possibly read-only) request transaction.
+      if (keyAuth) await db.query("UPDATE access_keys SET last_used_at=now() WHERE key_hash=$1 AND revoked_at IS NULL AND (last_used_at IS NULL OR last_used_at < now()-interval '1 minute')", [digest(token)]);
       if ((path === '/auth/password' || /^\/members\/[^/]+\/password$/.test(path)) && request.method === 'POST') {
         const session = await one(db, 'SELECT user_id FROM sessions WHERE token_hash=$1 AND expires_at>now()', [digest(token)]);
         await authThrottle(db, context.ip || 'unknown', `password:${session?.user_id || digest(token)}`);
@@ -220,12 +235,15 @@ export function createApi(options = {}) {
       let stateNotModified = false;
       const result = await db.transaction(async (tx) => {
         if (path === '/state' && request.method === 'GET') await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-        const user = await one(tx, 'SELECT u.*,clock_timestamp() AS server_time FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at > now()', [digest(token)]);
-        if (!user) fail(401, 'unauthorized', 'Your session expired. Please sign in again.');
-        const requestKey = request.method === 'POST' && !path.startsWith('/auth/') ? request.headers.get('idempotency-key') : null;
+        const user = keyAuth
+          ? await one(tx, 'SELECT u.*,clock_timestamp() AS server_time FROM users u JOIN access_keys k ON k.user_id=u.id WHERE k.key_hash=$1 AND k.revoked_at IS NULL', [digest(token)])
+          : await one(tx, 'SELECT u.*,clock_timestamp() AS server_time FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at > now()', [digest(token)]);
+        if (!user) fail(401, 'unauthorized', keyAuth ? 'This access key is invalid or has been revoked.' : 'Your session expired. Please sign in again.');
+        // New key secrets are never written to the replay store.
+        const requestKey = request.method === 'POST' && !path.startsWith('/auth/') && path !== '/access-keys' ? request.headers.get('idempotency-key') : null;
         if (requestKey !== null) {
           if (!/^[A-Za-z0-9._:-]{8,128}$/.test(requestKey)) fail(400, 'invalid_idempotency_key', 'Idempotency-Key must be 8–128 letters, numbers, periods, underscores, colons, or hyphens.');
-          const fingerprint = digest(`${request.method}:${path}:${JSON.stringify(Object.fromEntries(Object.entries(body).sort(([a], [b]) => a.localeCompare(b))))}`);
+          const fingerprint = digest(`${request.method}:${hookMatch ? '/hooks' : path}:${JSON.stringify(Object.fromEntries(Object.entries(body).sort(([a], [b]) => a.localeCompare(b))))}`);
           await tx.query("DELETE FROM mutation_requests WHERE created_at < now()-interval '24 hours'");
           // Concurrent duplicates wait on the unique row until the first transaction commits.
           await tx.query('INSERT INTO mutation_requests(user_id,request_key,fingerprint) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [user.id, requestKey, fingerprint]);
@@ -233,19 +251,70 @@ export function createApi(options = {}) {
           if (saved.fingerprint !== fingerprint) fail(409, 'idempotency_conflict', 'This request key was already used for a different change.');
           if (saved.response !== null) return saved.response;
         }
-        const execute = async () => {
-        if (path === '/auth/logout' && request.method === 'POST') {
+        const execute = async (method, path, body) => {
+        if (path === '/auth/logout' && method === 'POST') {
           await tx.query('DELETE FROM sessions WHERE token_hash=$1', [digest(token)]);
           return { ok: true };
         }
-        if (path === '/auth/password' && request.method === 'POST') {
+        if (path === '/auth/password' && method === 'POST') {
           const lockedUser = await one(tx, 'SELECT * FROM users WHERE id=$1 FOR NO KEY UPDATE', [user.id]);
           if (!await verifyPassword(password(body.currentPassword, 'Current password'), lockedUser.password_hash)) fail(401, 'invalid_credentials', 'Current password is incorrect.');
           await tx.query('UPDATE users SET password_hash=$1 WHERE id=$2', [await hashPassword(password(body.newPassword, 'New password')), user.id]);
           await tx.query('DELETE FROM sessions WHERE user_id=$1 AND token_hash<>$2', [user.id, digest(token)]);
           return { ok: true };
         }
-        if (path === '/state' && request.method === 'GET') {
+        if (path === '/access-keys' && method === 'GET') return { keys: (await tx.query('SELECT * FROM access_keys WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at DESC,id', [user.id])).rows.map(accessKeyJson) };
+        if (path === '/access-keys' && method === 'POST') {
+          if (Object.keys(body).some((key) => key !== 'name')) fail(400, 'invalid_input', 'Only a key name can be set.');
+          const name = string(body.name, 'Key name', { min: 1, max: 100 });
+          await tx.query('SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE', [user.id]);
+          if ((await one(tx, 'SELECT COUNT(*)::integer AS count FROM access_keys WHERE user_id=$1 AND revoked_at IS NULL', [user.id])).count >= 50) fail(409, 'too_many_keys', 'Revoke an unused access key before creating another. The limit is 50.');
+          const { secret, prefix, hash } = createAccessKey();
+          const row = await one(tx, 'INSERT INTO access_keys(id,user_id,name,prefix,key_hash) VALUES($1,$2,$3,$4,$5) RETURNING *', [randomUUID(), user.id, name, prefix, hash]);
+          return { key: accessKeyJson(row), secret };
+        }
+        const accessKeyMatch = path.match(/^\/access-keys\/([^/]+)$/);
+        if (accessKeyMatch && method === 'DELETE') {
+          if (!await one(tx, 'UPDATE access_keys SET revoked_at=now() WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL RETURNING id', [accessKeyMatch[1], user.id])) fail(404, 'not_found', 'Access key not found.');
+          return { ok: true };
+        }
+        // Webhooks translate one action into the matching REST route, so every
+        // permission, lock, and validation rule is the REST rule.
+        if (/^\/hooks(\/[^/]+)?$/.test(path) && method === 'POST') {
+          const actions = ['start', 'stop', 'toggle', 'log', 'update', 'delete'];
+          if (!actions.includes(body.action)) fail(400, 'invalid_action', `Action must be one of: ${actions.join(', ')}.`);
+          const entryId = own(body, 'entryId') ? string(body.entryId, 'Entry ID', { min: 1, max: 80 }) : undefined;
+          const running = await one(tx, 'SELECT id FROM entries WHERE user_id=$1 AND started_at IS NOT NULL', [user.id]);
+          const action = body.action === 'toggle' ? (running ? 'stop' : 'start') : body.action;
+          // Senders pass an IANA timezone so default dates follow their clock, not the server's UTC day.
+          const zone = own(body, 'timezone') ? string(body.timezone, 'Timezone', { min: 1, max: 64 }) : null;
+          const today = () => { if (!zone) return new Date().toISOString().slice(0, 10); try { return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch { fail(400, 'invalid_input', 'Timezone must be an IANA name such as America/Chicago.'); } };
+          const dated = (fields) => own(body, 'date') ? fields : { ...fields, date: today() };
+          const withMinutes = (fields) => own(body, 'durationMinutes') && !own(body, 'durationSeconds') ? { ...fields, durationSeconds: Math.round(number(body.durationMinutes, 'Duration minutes', 10080) * 60) } : fields;
+          const teamOf = async () => {
+            if (own(body, 'teamId')) return body.teamId;
+            if (entryId) {
+              const entry = await one(tx, 'SELECT team_id FROM entries WHERE id=$1 AND user_id=$2', [entryId, user.id]);
+              if (!entry) fail(404, 'not_found', 'Time entry not found.');
+              return entry.team_id;
+            }
+            const project = await one(tx, 'SELECT p.team_id FROM projects p JOIN memberships m ON m.team_id=p.team_id AND m.user_id=$2 WHERE p.id=$1', [string(body.projectId, 'Project ID', { min: 1, max: 80 }), user.id]);
+            if (!project) fail(400, 'invalid_project', 'Choose a project in one of your teams.');
+            return project.team_id;
+          };
+          if (action === 'start') return execute('POST', '/timer/start', dated({ ...pick(body, ['projectId', 'task', 'notes', 'billable', 'date', 'agent', 'entryId', 'version']), teamId: await teamOf() }));
+          if (action === 'stop') {
+            const id = body.action === 'stop' && entryId ? entryId : running?.id;
+            return id ? execute('POST', '/timer/stop', { ...pick(body, ['agent', ...(body.action === 'stop' ? ['version'] : [])]), entryId: id }) : { entry: null };
+          }
+          if (action === 'log') return execute('POST', '/entries', withMinutes({ date: today(), ...pick(body, ['projectId', 'task', 'notes', 'billable', 'date', 'durationSeconds', 'agent']), teamId: await teamOf() }));
+          if (!entryId) fail(400, 'invalid_input', 'Provide the entryId to change.');
+          // Without a version, lock the entry and use its current version.
+          const version = own(body, 'version') ? body.version : (await editableEntry(tx, entryId, user)).row.version;
+          if (action === 'delete') return execute('DELETE', `/entries/${entryId}`, { version });
+          return execute('PATCH', `/entries/${entryId}`, withMinutes({ ...Object.fromEntries(Object.entries(body).filter(([key]) => !['action', 'entryId', 'durationMinutes', 'timezone'].includes(key))), version }));
+        }
+        if (path === '/state' && method === 'GET') {
           const teams = (await tx.query('SELECT t.id,t.name,m.role FROM teams t JOIN memberships m ON m.team_id=t.id WHERE m.user_id=$1 ORDER BY t.created_at,t.id', [user.id])).rows;
           const team = url.searchParams.has('teamId') ? teams.find((t) => t.id === url.searchParams.get('teamId')) : teams[0];
           if (!team) fail(403, 'team_access_denied', 'You do not have access to this team.');
@@ -269,18 +338,18 @@ export function createApi(options = {}) {
           });
           return stateNotModified ? null : { ...snapshot, serverTime: stateServerTime };
         }
-        if (path === '/teams' && request.method === 'POST') {
+        if (path === '/teams' && method === 'POST') {
           await tx.query('SELECT id FROM app_locks WHERE id=1 FOR UPDATE');
           return { team: await createTeam(tx, user.id, string(body.name, 'Team name', { min: 1, max: 100 })) };
         }
         const teamMatch = path.match(/^\/teams\/([^/]+)$/);
-        if (teamMatch && request.method === 'PATCH') {
+        if (teamMatch && method === 'PATCH') {
           await tx.query('SELECT id FROM teams WHERE id=$1 FOR NO KEY UPDATE', [teamMatch[1]]);
           await membership(tx, teamMatch[1], user.id, true);
           if (Object.keys(body).some((key) => key !== 'name')) fail(400, 'invalid_input', 'Only the team name can be changed.');
           return { team: await one(tx, 'UPDATE teams SET name=$1 WHERE id=$2 RETURNING id,name', [string(body.name, 'Team name', { min: 1, max: 100 }), teamMatch[1]]) };
         }
-        if (path === '/timer/start' && request.method === 'POST') {
+        if (path === '/timer/start' && method === 'POST') {
           const teamId = string(body.teamId, 'Team ID', { min: 1, max: 80 });
           await membership(tx, teamId, user.id);
           // NO KEY UPDATE serializes timers while remaining compatible with the
@@ -304,13 +373,13 @@ export function createApi(options = {}) {
           else entry = await one(tx, 'INSERT INTO entries(id,team_id,user_id,project_id,task,notes,date,billable,started_at,agent_tokens,agent_cost,agent_model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11) RETURNING *', [randomUUID(), teamId, user.id, project.id, string(body.task, 'Task', { max: 200, fallback: '' }), string(body.notes, 'Notes', { max: 4000, fallback: '' }), date(body.date || new Date().toISOString().slice(0, 10)), bool(body.billable, 'Billable', project.billable), ...agentValues(usage)]);
           return { entry: entryJson(entry) };
         }
-        if (path === '/timer/stop' && request.method === 'POST') {
+        if (path === '/timer/stop' && method === 'POST') {
           const { row } = await editableEntry(tx, string(body.entryId, 'Entry ID', { min: 1, max: 80 }), user);
           if (row.user_id !== user.id) fail(403, 'entry_access_denied', 'You can only stop your own timer.');
           checkVersion(body.version, row, true);
           return { entry: entryJson(await stopEntry(tx, row, own(body, 'agent') ? agent(body.agent) : undefined)) };
         }
-        if (path === '/entries' && request.method === 'POST') {
+        if (path === '/entries' && method === 'POST') {
           const teamId = string(body.teamId, 'Team ID', { min: 1, max: 80 });
           const member = await membership(tx, teamId, user.id);
           const userId = own(body, 'userId') ? string(body.userId, 'User ID', { min: 1, max: 80 }) : user.id;
@@ -321,10 +390,10 @@ export function createApi(options = {}) {
           return { entry: entryJson(entry) };
         }
         const entryMatch = path.match(/^\/entries\/([^/]+)$/);
-        if (entryMatch && ['PATCH', 'DELETE'].includes(request.method)) {
+        if (entryMatch && ['PATCH', 'DELETE'].includes(method)) {
           const { row, member } = await editableEntry(tx, entryMatch[1], user);
           checkVersion(body.version ?? (url.searchParams.has('version') ? Number(url.searchParams.get('version')) : undefined), row);
-          if (request.method === 'DELETE') {
+          if (method === 'DELETE') {
             if (row.started_at || row.status !== 'unbilled') fail(409, 'entry_locked', 'Stop this timer and mark it unbilled before deleting.');
             await tx.query('DELETE FROM entries WHERE id=$1', [row.id]);
             return { ok: true };
@@ -353,9 +422,9 @@ export function createApi(options = {}) {
           return { entry: entryJson(updated) };
         }
         const entityMatch = path.match(/^\/(clients|projects)(?:\/([^/]+))?$/);
-        if (entityMatch && ['POST', 'PATCH'].includes(request.method)) {
+        if (entityMatch && ['POST', 'PATCH'].includes(method)) {
           const [, table, id] = entityMatch;
-          if ((request.method === 'POST' && id) || (request.method === 'PATCH' && !id)) fail(404, 'not_found', 'Endpoint not found.');
+          if ((method === 'POST' && id) || (method === 'PATCH' && !id)) fail(404, 'not_found', 'Endpoint not found.');
           const previous = id ? await one(tx, `SELECT * FROM ${table} WHERE id=$1 FOR UPDATE`, [id]) : null;
           if (id && !previous) fail(404, 'not_found', 'Item not found.');
           const teamId = previous?.team_id || string(body.teamId, 'Team ID', { min: 1, max: 80 });
@@ -378,7 +447,7 @@ export function createApi(options = {}) {
           else row = await one(tx, `INSERT INTO ${table}(id,team_id,${fields.join(',')}) VALUES($1,$2,${fields.map((_, i) => `$${i + 3}`).join(',')}) RETURNING *`, [randomUUID(), teamId, ...Object.values(values)]);
           return table === 'clients' ? { client: clientJson(row) } : { project: projectJson(row) };
         }
-        if (path === '/members' && request.method === 'POST') {
+        if (path === '/members' && method === 'POST') {
           await tx.query('SELECT id FROM app_locks WHERE id=1 FOR UPDATE');
           const teamId = string(body.teamId, 'Team ID', { min: 1, max: 80 });
           await membership(tx, teamId, user.id, true);
@@ -389,7 +458,7 @@ export function createApi(options = {}) {
           return { member: memberJson({ ...member, name: addedUser.name, username: addedUser.username }) };
         }
         const memberMatch = path.match(/^\/members\/([^/]+)(\/password)?$/);
-        if (memberMatch && ((!memberMatch[2] && ['PATCH', 'DELETE'].includes(request.method)) || (memberMatch[2] && request.method === 'POST'))) {
+        if (memberMatch && ((!memberMatch[2] && ['PATCH', 'DELETE'].includes(method)) || (memberMatch[2] && method === 'POST'))) {
           // Account-wide changes must serialize with invitations and team creation.
           await tx.query('SELECT id FROM app_locks WHERE id=1 FOR UPDATE');
           const previous = await one(tx, 'SELECT * FROM memberships WHERE id=$1', [memberMatch[1]]);
@@ -408,9 +477,10 @@ export function createApi(options = {}) {
             if (!await verifyPassword(password(body.currentPassword, 'Your current password'), actor.password_hash)) fail(401, 'invalid_credentials', 'Your current password is incorrect.');
             await tx.query('UPDATE users SET password_hash=$1 WHERE id=$2', [await hashPassword(password(body.newPassword, 'New password')), target.id]);
             await tx.query('DELETE FROM sessions WHERE user_id=$1', [target.id]);
+            await tx.query('UPDATE access_keys SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL', [target.id]);
             return { ok: true };
           }
-          const removing = request.method === 'DELETE';
+          const removing = method === 'DELETE';
           if (!removing && (!Object.keys(body).length || Object.keys(body).some((key) => !['role', 'name'].includes(key)))) fail(400, 'invalid_input', 'Only name and role can be changed here.');
           const nextRole = removing ? 'member' : own(body, 'role') ? role(body.role) : previous.role;
           if (previous.role === 'admin' && nextRole === 'member') {
@@ -433,15 +503,15 @@ export function createApi(options = {}) {
         }
         fail(404, 'not_found', 'Endpoint not found.');
         };
-        const payload = await execute();
+        const payload = await execute(request.method, path, body);
         if (requestKey !== null) await tx.query('UPDATE mutation_requests SET response=$1 WHERE user_id=$2 AND request_key=$3', [JSON.stringify(payload), user.id, requestKey]);
         return payload;
       });
       const stateHeaders = stateTag ? { ETag: stateTag, 'X-Crops-Server-Time': stateServerTime, Date: new Date(stateServerTime).toUTCString() } : {};
       if (stateNotModified) return new Response(null, { status: 304, headers: { ...headers, ...stateHeaders } });
-      return respond(result, request.method === 'POST' && ['/teams', '/entries', '/clients', '/projects', '/members'].includes(path) ? 201 : 200, path === '/auth/logout' ? { 'Set-Cookie': sessionCookie('', productionEnvironment(env) || url.protocol === 'https:') } : stateHeaders);
+      return respond(result, request.method === 'POST' && (['/teams', '/entries', '/clients', '/projects', '/members', '/access-keys'].includes(path) || (hookMatch && body.action === 'log')) ? 201 : 200, path === '/auth/logout' ? { 'Set-Cookie': sessionCookie('', productionEnvironment(env) || url.protocol === 'https:') } : stateHeaders);
     } catch (error) {
-      if (error instanceof ApiError) return respond({ error: error.message, code: error.code }, error.status, error.status === 429 ? { 'Retry-After': '900' } : {});
+      if (error instanceof ApiError) return respond({ error: error.message, code: error.code }, error.status, error.status === 429 ? { 'Retry-After': String(error.retryAfter || 900) } : {});
       if (error.code === '23505') return respond({ error: 'This username or team membership already exists. Refresh and try again.', code: 'already_exists' }, 409);
       if (error.code === '23503' || error.code === '23514') return respond({ error: 'This change conflicts with related data. Refresh and try again.', code: 'data_conflict' }, 409);
       if (error.code === '40P01' || error.code === '40001') return respond({ error: 'Another device changed this data. Please try again.', code: 'concurrent_update' }, 409);

@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS mutation_requests (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(user_id,request_key)
 );
 CREATE INDEX IF NOT EXISTS mutation_requests_expiry ON mutation_requests(created_at);
+-- Personal access keys for the API, MCP server, and webhooks (SHA-256 hashes only).
+CREATE TABLE IF NOT EXISTS access_keys (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
+  prefix TEXT NOT NULL CHECK (char_length(prefix) BETWEEN 1 AND 20),
+  key_hash TEXT NOT NULL CHECK (key_hash ~ '^[a-f0-9]{64}$'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_used_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS access_keys_hash ON access_keys(key_hash);
+CREATE INDEX IF NOT EXISTS access_keys_user ON access_keys(user_id);
 
 -- Hosted PostgreSQL services may expose public-schema tables through a REST API.
 -- No direct client policies are granted. The Crops SQL table owner bypasses RLS
@@ -82,4 +92,5 @@ ALTER TABLE entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auth_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mutation_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE access_keys ENABLE ROW LEVEL SECURITY;
 `;

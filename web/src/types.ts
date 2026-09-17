@@ -66,5 +66,12 @@ export interface Snapshot {
   runningEntry: Entry | null;
   serverTime: string;
 }
+export interface AccessKey {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
 export type Page =
   "time" | "reports" | "projects" | "clients" | "team" | "billing" | "settings";

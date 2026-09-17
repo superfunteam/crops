@@ -8,8 +8,55 @@ The web, macOS menu bar, and Android apps share `/api`. Development runs on `htt
 - `POST /auth/login` `{username,password}` → `{token,user}`.
 - `POST /auth/logout` → `{ok:true}`. Revokes this session.
 - Send `Authorization: Bearer <token>`. Web may instead use the HttpOnly, SameSite=Lax session cookie. Sessions expire after 30 days. Native apps should store the token in OS-protected credential storage.
+- Scripts, integrations, and agents should use a personal **access key** instead of a password or session: `Authorization: Bearer crops_…`. See [Access keys](#access-keys).
 - Cookie-authenticated writes must supply a permitted `Origin`, or the browser-controlled `Sec-Fetch-Site: same-origin` header. Malformed Authorization headers never fall back to a cookie. Native Bearer requests do not require Origin.
 - `GET /health` returns `{ok,storage,registrationEnabled,serverTime}`. `storage` is `pglite`, `postgres`, or `netlify-postgres` in normal environments. `registrationEnabled` lets clients hide public signup when it is closed. Health never creates demo accounts.
+
+## Access keys
+
+Access keys let programs act as a user without that user's password. Create them in **Settings → Access keys** or with the API below. A key is `crops_` followed by 43 URL-safe random characters. Crops stores only its SHA-256 hash, so the secret is shown once, at creation.
+
+- `GET /access-keys` → `{keys:[{id,name,prefix,createdAt,lastUsedAt}]}`. Active (unrevoked) keys for the signed-in user, newest first. `prefix` is the first 12 characters, for recognizing a key; the secret is never returned again.
+- `POST /access-keys` `{name}` → 201 `{key:{id,name,prefix,createdAt,lastUsedAt},secret}`. Name is 1–100 characters. At most 50 active keys per user (409 `too_many_keys`). This route ignores `Idempotency-Key`, so secrets never enter the replay store; a retried request can create a second key, which you can revoke.
+- `DELETE /access-keys/:id` → `{ok:true}`. Revokes one of your own keys immediately. Unknown, already revoked, or another user's key returns 404.
+
+Send a key as `Authorization: Bearer crops_…` on any other endpoint. It authenticates as its owner with exactly that user's current permissions: team access, admin rules, and entry locks are checked on every request from current memberships, so removing someone from a team removes that access for their keys too. Keys are never read from cookies and need no `Origin` header. Keys do not expire; `lastUsedAt` is updated at most once a minute. Revoked or unknown keys return 401.
+
+Managing keys, changing passwords (`/auth/password`, `/members/:id/password`), and `/auth/logout` require a signed-in session. With an access key they return 403 `session_required`, so a leaked key cannot mint more keys or lock the owner out. Changing your own password keeps your keys; revoke keys you no longer use. An admin password reset for a teammate revokes all of that teammate's sessions **and** access keys.
+
+## Webhooks
+
+`POST /hooks/:key` accepts one action from tools that can only POST to a URL, such as Zapier, iOS Shortcuts, Stream Deck, CI jobs, or Claude Code hooks. **The URL contains the access key, so treat it like a password.** Senders that can set headers may instead `POST /hooks` with `Authorization: Bearer crops_…`. Session tokens and cookies are not accepted here.
+
+The body is a JSON object with an `action`. The content type does not need to be `application/json`. Each action runs the matching REST route inside one transaction, with the same validation, permissions, locks, and response JSON:
+
+| `action` | Fields | Same as |
+| --- | --- | --- |
+| `start` | `projectId`, `task?`, `notes?`, `billable?`, `date?`, `agent?`; or `entryId` to resume your own entry | `POST /timer/start` → `{entry}` |
+| `stop` | `entryId?`, `agent?` | `POST /timer/stop` → `{entry}`. Without `entryId` it stops your running timer, or returns `{entry:null}` if none is running. |
+| `toggle` | as `start` | Stops your running timer (any project) if one runs; otherwise starts. → `{entry}` |
+| `log` | `projectId`, `durationSeconds` or `durationMinutes`, `date?`, `task?`, `notes?`, `billable?`, `agent?` | `POST /entries` → 201 `{entry}` |
+| `update` | `entryId`, `version?`, and any of `task`, `notes`, `date`, `durationSeconds`/`durationMinutes`, `projectId`, `billable`, `status`, `agent` | `PATCH /entries/:id` → `{entry}` |
+| `delete` | `entryId`, `version?` | `DELETE /entries/:id` → `{ok:true}` |
+
+The team is taken from the project (or entry), which must belong to one of your teams; an explicit `teamId` is also accepted. `date` defaults to today in the optional `timezone` you send (an IANA name such as `America/Chicago`), otherwise the server's UTC date. Send `timezone` or `date` so evening entries don't land on tomorrow. For `update` and `delete`, `version` is optional: without it Crops locks the entry and uses its current version (last write wins). Send `version` to get 409 `version_conflict` protection. The REST `PATCH`/`DELETE` routes still require a version. `Idempotency-Key` works as for other POSTs. Webhooks are rate limited to 120 requests per minute per key and 600 per minute per source IP (429 with `Retry-After`). Unknown actions return 400 `invalid_action`.
+
+```sh
+# Toggle a timer from a Stream Deck button or a shortcut
+curl -X POST "https://crops.wims.vc/api/hooks/$CROPS_ACCESS_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"toggle","projectId":"project-uuid","task":"Focus","timezone":"America/Chicago"}'
+
+# Log 30 minutes from CI, with the key in a header instead of the URL
+curl -X POST https://crops.wims.vc/api/hooks \
+  -H "Authorization: Bearer $CROPS_ACCESS_KEY" -H 'Content-Type: application/json' \
+  -d '{"action":"log","projectId":"project-uuid","durationMinutes":30,"task":"Deploy"}'
+
+# Fix the notes on an entry without looking up its version
+curl -X POST "https://crops.wims.vc/api/hooks/$CROPS_ACCESS_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"update","entryId":"entry-uuid","notes":"Client call"}'
+```
 
 ## Shared state / synchronization
 
@@ -73,7 +120,7 @@ Clients, projects, members, and billing status require team admin access. Cross-
 
 ## Errors
 
-Non-2xx responses are `{error:"Human-readable message",code:"machine_code"}`. Common statuses: 400 invalid input, 401 expired/missing credentials, 403 insufficient access, 404 missing object, 409 stale version / locked time / conflicting state, 429 login throttled, 503 database unconfigured. Never treat an unsuccessful server response as a successful local mutation.
+Non-2xx responses are `{error:"Human-readable message",code:"machine_code"}`. Common statuses: 400 invalid input, 401 expired/missing credentials or a revoked access key, 403 insufficient access (or `session_required` for an access key), 404 missing object, 409 stale version / locked time / conflicting state, 429 sign-in or webhook rate limited, 503 database unconfigured. Never treat an unsuccessful server response as a successful local mutation.
 
 ## Storage and operations
 

@@ -163,11 +163,14 @@ struct TrackerView: View {
     @State private var manual = false
     @State private var duration = ""
     @State private var manualDate = Date()
+    @State private var editing: Entry?
+    @State private var pendingDelete: Entry?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ErrorBanner()
                 if showComposer { composer }
+                else if let editing { EntryEditView(entry: editing) { self.editing = nil }.id(editing.id) }
                 else {
                     HStack {
                         Label(store.state?.runningEntry == nil ? "No timer running" : "Timer running", systemImage: store.state?.runningEntry == nil ? "pause.circle" : "play.circle.fill")
@@ -196,7 +199,7 @@ struct TrackerView: View {
                     } else {
                         VStack(spacing: 0) {
                             ForEach(store.dayEntries) { entry in
-                                EntryRow(entry: entry)
+                                EntryRow(entry: entry, edit: { store.error = nil; editing = entry }, requestDelete: { pendingDelete = entry })
                                 if entry.id != store.dayEntries.last?.id { Divider().padding(.leading, 25).opacity(0.5) }
                             }
                         }.padding(.horizontal, 12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 12))
@@ -206,7 +209,11 @@ struct TrackerView: View {
                     }
                 }
             }.padding(.horizontal, 24).padding(.bottom, 22)
-        }.onChange(of: store.state?.team.id) { _ in showComposer = false }
+        }.onChange(of: store.state?.team.id) { _ in showComposer = false; editing = nil }
+        .confirmationDialog("Delete this entry?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible, presenting: pendingDelete) { entry in
+            Button("Delete entry", role: .destructive) { Task { await store.delete(entry: entry) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { entry in Text(deleteMessage(entry, store: store)) }
     }
     private func runningCard(_ entry: Entry) -> some View {
         VStack(alignment: .leading, spacing: 17) {
@@ -328,9 +335,29 @@ struct WeekStrip: View {
     }
 }
 
+@MainActor func deleteMessage(_ entry: Entry, store: CropsStore) -> String {
+    let day = CropsTime.date(fromKey: entry.date)?.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) ?? entry.date
+    return "\(store.project(entry.projectId)?.name ?? "Project") · \(entry.task.isEmpty ? "Focused work" : entry.task) · \(CropsTime.clock(entry.durationSeconds, seconds: false)) on \(day). This can’t be undone."
+}
+
+struct AgentUsageLabel: View {
+    let usage: AgentUsage
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "sparkles").font(.system(size: 8))
+            Text(usage.label).font(.system(size: 9, weight: .medium)).monospacedDigit()
+        }.foregroundStyle(.secondary).accessibilityElement(children: .combine).accessibilityLabel("Agent usage: \(usage.label)")
+    }
+}
+
 struct EntryRow: View {
     @EnvironmentObject var store: CropsStore
     let entry: Entry
+    var edit: () -> Void = {}
+    var requestDelete: () -> Void = {}
+    @State private var hoveringEdit = false
+    private var canResume: Bool { !entry.isRunning && !entry.isLocked && store.project(entry.projectId)?.archived != true }
+    private var canDelete: Bool { store.state.map { EntryDraft.canDelete(entry, userId: $0.user.id) } ?? false }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             RoundedRectangle(cornerRadius: 2).fill(Palette.hex(store.project(entry.projectId)?.color ?? "#58735D")).frame(width: 3, height: 35)
@@ -338,16 +365,183 @@ struct EntryRow: View {
                 Text(store.project(entry.projectId)?.name ?? "Project").font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Text(entry.task.isEmpty ? "Focused work" : entry.task).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                 if !entry.notes.isEmpty { Text(entry.notes).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1) }
+                if let agent = entry.agent { AgentUsageLabel(usage: agent) }
                 if entry.status != "unbilled" { Text(entry.status.capitalized).font(.system(size: 9, weight: .medium)).foregroundStyle(Palette.accent) }
             }
             Spacer(minLength: 2)
+            Button(action: edit) { Image(systemName: entry.isLocked ? "lock" : "pencil").font(.system(size: 11)).frame(width: 20, height: 28).contentShape(Rectangle()) }
+                .buttonStyle(.plain).foregroundStyle(hoveringEdit ? Palette.accent : Palette.ink.opacity(0.35)).onHover { hoveringEdit = $0 }
+                .help(entry.isLocked ? "View this locked entry" : "Edit this entry").accessibilityLabel(entry.isLocked ? "View \(entry.task.isEmpty ? "entry" : entry.task)" : "Edit \(entry.task.isEmpty ? "entry" : entry.task)").disabled(store.busy)
             Text(CropsTime.clock(store.elapsed(entry), seconds: false)).font(.system(size: 14, weight: .medium)).monospacedDigit()
             if entry.startedAt != nil {
                 Image(systemName: "waveform.path").font(.system(size: 13)).foregroundStyle(Palette.accent).frame(width: 25, height: 28).accessibilityLabel("Running")
-            } else if entry.status == "unbilled" && store.project(entry.projectId)?.archived != true {
+            } else if canResume {
                 Button { Task { await store.start(entry: entry) } } label: { Image(systemName: "play.circle").font(.system(size: 21, weight: .ultraLight)).frame(width: 25, height: 28) }.buttonStyle(.plain).foregroundStyle(Palette.accent).help("Resume this entry").accessibilityLabel("Resume \(entry.task.isEmpty ? "entry" : entry.task)").disabled(store.busy)
             } else { Image(systemName: "checkmark.circle").foregroundStyle(.tertiary).frame(width: 25, height: 28) }
         }.padding(.vertical, 14)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { if !store.busy { edit() } }
+        .contextMenu {
+            Button(entry.isLocked ? "View details" : "Edit…", action: edit).disabled(store.busy)
+            if entry.isRunning { Button("Stop timer") { Task { await store.stop(entry: entry) } }.disabled(store.busy) }
+            else if canResume { Button("Resume") { Task { await store.start(entry: entry) } }.disabled(store.busy) }
+            if canDelete {
+                Divider()
+                Button("Delete…", role: .destructive, action: requestDelete).disabled(store.busy)
+            }
+        }
+    }
+}
+
+struct EntryEditView: View {
+    @EnvironmentObject var store: CropsStore
+    @State private var base: Entry
+    @State private var draft: EntryDraft
+    @State private var confirmingDelete = false
+    let close: () -> Void
+
+    init(entry: Entry, close: @escaping () -> Void) {
+        _base = State(initialValue: entry)
+        _draft = State(initialValue: EntryDraft(entry: entry))
+        self.close = close
+    }
+    private var latest: Entry? { store.state?.entries.first { $0.id == base.id } }
+    private var lockReason: String? { EntryDraft.lockReason(base) }
+    private var canDelete: Bool { store.state.map { EntryDraft.canDelete(base, userId: $0.user.id) } ?? false }
+    private var durationValid: Bool { base.isRunning || draft.parsedDuration != nil }
+    private var projectOptions: [Project] {
+        var list = store.activeProjects
+        if !list.contains(where: { $0.id == draft.projectId }), let current = store.project(draft.projectId) { list.insert(current, at: 0) }
+        return list
+    }
+    private var dayBinding: Binding<Date> {
+        Binding(get: { CropsTime.date(fromKey: draft.date) ?? Date() }, set: { draft.date = CropsTime.dateKey($0) })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Button(action: close) { Label("Back", systemImage: "chevron.left") }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).disabled(store.busy)
+                    .keyboardShortcut(.cancelAction).accessibilityLabel("Back to timesheet")
+                Spacer()
+                Text(lockReason != nil ? "ENTRY DETAILS" : "EDIT ENTRY").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
+            }.padding(.bottom, 6)
+            HStack {
+                Text(lockReason != nil ? "This time is settled." : base.isRunning ? "Tend the running timer." : "Fine-tune your time.").font(.system(size: 18, weight: .medium, design: .serif))
+                Spacer()
+            }
+            if store.state != nil && latest == nil {
+                notice("This entry is no longer on your timesheet. It may have been deleted on another device.", symbol: "questionmark.circle")
+            } else if let latest, latest.version != base.version {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(Palette.accent)
+                    Text("This entry changed on another device.").font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Load latest") { load(latest) }.buttonStyle(.plain).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.accent).disabled(store.busy)
+                }.padding(10).background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
+            }
+            if let lockReason {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "lock.fill").font(.system(size: 11)).foregroundStyle(Palette.accent)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(base.status.capitalized).font(.system(size: 11, weight: .semibold))
+                        Text(lockReason).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }.padding(10).background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
+            }
+            Group {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Project").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    Picker("Project", selection: Binding(get: { draft.projectId }, set: { id in
+                        guard id != draft.projectId else { return }
+                        draft.projectId = id
+                        if let project = store.project(id) { draft.billable = project.billable }
+                    })) {
+                        ForEach(projectOptions) { project in
+                            Text((store.clientName(project.id).map { "\($0) · " } ?? "") + project.name + (project.archived == true ? " (archived)" : "")).tag(project.id)
+                        }
+                    }.labelsHidden().pickerStyle(.menu).controlSize(.large).frame(maxWidth: .infinity).accessibilityLabel("Project")
+                }
+                InputField(label: "Task", placeholder: "Design, development, a good idea…", text: $draft.task)
+                InputField(label: "Notes · optional", placeholder: "A few details for later", text: $draft.notes)
+                HStack(alignment: .bottom, spacing: 12) {
+                    if base.isRunning {
+                        InputField(label: "Duration (hours)", text: .constant(CropsTime.clock(store.elapsed(base)))).disabled(true)
+                    } else {
+                        InputField(label: "Duration (hours)", placeholder: "1:30, 1.5, or 1:30:15", text: $draft.duration)
+                    }
+                    DatePicker("Date", selection: dayBinding, in: ...max(Date(), CropsTime.date(fromKey: base.date) ?? Date()), displayedComponents: .date)
+                        .datePickerStyle(.field).font(.system(size: 11)).frame(width: 155).padding(.bottom, 9).disabled(base.isRunning)
+                }
+                if base.isRunning {
+                    Label("Stop the timer to change its date or duration.", systemImage: "clock").font(.system(size: 11)).foregroundStyle(.secondary)
+                } else if lockReason == nil && !durationValid {
+                    Text(EntryEditError.invalidDuration.localizedDescription).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("Billable", isOn: $draft.billable).toggleStyle(.checkbox).font(.system(size: 11))
+            }.disabled(lockReason != nil || store.busy)
+            if let agent = base.agent {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Agent usage").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        AgentUsageLabel(usage: agent)
+                        if let model = agent.model, !model.isEmpty { Text(model).font(.system(size: 9)).foregroundStyle(.tertiary) }
+                    }
+                }
+            }
+            if lockReason != nil {
+                Button { store.openWeb() } label: { HStack { Image(systemName: "arrow.up.right").font(.system(size: 10)); Text("Open web app") } }
+                    .buttonStyle(.bordered).frame(maxWidth: .infinity)
+                Button("Done", action: close).buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            } else {
+                Button(action: save) { HStack { Image(systemName: "checkmark").font(.system(size: 10)); Text(store.busy ? "Saving…" : "Save changes") } }
+                    .buttonStyle(PrimaryButtonStyle()).disabled(store.busy || draft.projectId.isEmpty || !durationValid || latest == nil)
+                    .keyboardShortcut(.defaultAction)
+                if canDelete {
+                    Button { confirmingDelete = true } label: { Label("Delete entry", systemImage: "trash").font(.system(size: 11, weight: .medium)) }
+                        .buttonStyle(.plain).foregroundStyle(.red.opacity(0.85)).frame(maxWidth: .infinity).disabled(store.busy)
+                        .keyboardShortcut(.delete, modifiers: .command).help("Delete this entry (⌘⌫)")
+                } else if base.isRunning {
+                    Text("Stop the timer before deleting this entry.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .confirmationDialog("Delete this entry?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete entry", role: .destructive) { remove() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(deleteMessage(base, store: store)) }
+    }
+
+    private func notice(_ text: String, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(.orange)
+            Text(text).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }.padding(10).background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+    private func load(_ entry: Entry) { base = entry; draft = EntryDraft(entry: entry) }
+    private func save() {
+        guard !store.busy else { return }
+        let submitted = draft
+        Task {
+            if await store.update(entry: base, draft: submitted) {
+                if let day = CropsTime.date(fromKey: submitted.date), !base.isRunning { store.selectedDay = Calendar.current.startOfDay(for: day) }
+                close()
+            } else { reconcile() }
+        }
+    }
+    private func remove() {
+        Task { if await store.delete(entry: base) { close() } else { reconcile() } }
+    }
+    /// A failed write has already refetched canonical state; show the newest version rather than retrying a stale one.
+    private func reconcile() {
+        guard store.state != nil, let fresh = latest else { return }
+        if fresh.version != base.version {
+            load(fresh)
+            store.error = "This entry changed on another device. Its latest details are shown; review them and try again."
+        }
     }
 }
 
@@ -376,7 +570,7 @@ struct SettingsView: View {
                     Button("Sign out") { confirmingLogout = true }.disabled(store.busy)
                 }
                 Divider()
-                HStack { VStack(alignment: .leading, spacing: 4) { Text("Crops for Mac").font(.system(size: 12, weight: .medium)); Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0") · Made for focused work").font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "leaf").font(.title2).foregroundStyle(Palette.accent) }
+                HStack { VStack(alignment: .leading, spacing: 4) { Text("Crops for Mac").font(.system(size: 12, weight: .medium)); Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0") · Made for focused work").font(.system(size: 10)).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "leaf").font(.title2).foregroundStyle(Palette.accent) }
                 Button("Quit Crops") { NSApp.terminate(nil) }
                 Text("Quitting leaves your server timer running. Stop it first when you’re done for the day.").font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
             }.padding(.horizontal, 24).padding(.bottom, 24)

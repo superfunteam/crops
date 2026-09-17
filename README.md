@@ -49,7 +49,9 @@ These artifacts are **internal test builds**: macOS is ad hoc signed and not not
 - Mark billable time unbilled, invoiced, or paid. Invoiced/paid entries are locked until an admin explicitly marks them unbilled.
 - Native macOS menu-bar timer with keyboard shortcuts, daily window and Keychain session storage.
 - Native Android foreground notification with elapsed chronometer and Stop action; optional background discovery of timers started elsewhere; Keystore session storage.
-- Agents: time entries carry agent-reported token usage and USD cost, billed on top of hours × rate. A zero-dependency MCP server (`npm run mcp`) and Claude Code hooks let an agent start/stop timers and log its usage; see [docs/MCP.md](docs/MCP.md).
+- Personal access keys from Settings for scripts, integrations, and agents. Keys act with their owner's current permissions, are stored only as hashes, and can be revoked at any time.
+- Inbound webhooks (`POST /api/hooks/<key>`) to start, stop, toggle, log, edit, and delete time from Zapier, iOS Shortcuts, Stream Deck, CI, or Claude Code hooks; see [docs/API.md](docs/API.md#webhooks).
+- Agents: time entries carry agent-reported token usage and USD cost, billed on top of hours × rate. A zero-dependency MCP server (`npm run mcp`) and Claude Code hooks let an agent start/stop/resume timers, log time, list, edit, and delete entries, and report its usage; see [docs/MCP.md](docs/MCP.md).
 - Server-clock correction, stale-edit conflict protection, conditional sync requests, persistent duplicate-request protection, and visible connection failures.
 
 Billing amounts use **current project rates in USD**, not historical invoice snapshots. Invoice documents, payments, and bank integrations stay with your existing bank.

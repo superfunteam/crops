@@ -106,7 +106,7 @@ test('PostgreSQL cold starts and mutations coordinate across separate connection
       try {
         await connection.query('BEGIN');
         await connection.query(`SET LOCAL ROLE ${readerRole}`);
-        for (const table of ['users', 'sessions', 'entries', 'memberships', 'mutation_requests']) {
+        for (const table of ['users', 'sessions', 'entries', 'memberships', 'mutation_requests', 'access_keys']) {
           assert.equal((await connection.query(`SELECT * FROM ${schema}.${table}`)).rows.length, 0, `An unprivileged role must not see ${table}, even with SELECT granted.`);
         }
         await assert.rejects(connection.query(`INSERT INTO ${schema}.users(id,username,name,password_hash) VALUES('untrusted','untrusted','Untrusted','not-a-real-hash')`), (error) => error.code === '42501');

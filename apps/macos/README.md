@@ -23,16 +23,21 @@ Open the app and sign in or create a workspace. Fresh installs connect to **`htt
 - Click **+ New entry** to choose a project and start a timer. The form opens only after that action; **Back** or Escape returns to the timesheet. A successful start returns to the active timer automatically.
 - Stop from the green timer panel. Stop sends the displayed entry version, so an outdated window cannot stop a newer session resumed elsewhere. Resume a stopped unbilled entry using its play button.
 - Choose **New entry → Manual time** to add time. Enter `1:30` or `1.5` for 90 minutes. Saving returns to that day's entries.
+- Edit an entry with its pencil button, a double-click, or the right-click menu. The edit form matches New entry: project, task, notes, date, duration (`1:30`, `1.5`, or `1:30:15`, up to one week), and billable. Return saves and Escape goes back; unchanged forms simply close. A running timer can change its project, task, notes, and billable flag; stop it first to change its date or duration.
+- Saves send only the changed fields with the entry version you opened. If the entry changed on another device, the save is refused, the app refetches, loads the latest details into the form, and shows the error banner so you can review and save again. A notice with **Load latest** also appears if a sync brings a newer version while you edit.
+- Invoiced and paid entries show a lock and open read-only with the reason; a team admin can mark them unbilled in the web app.
+- Delete your own stopped, unbilled entries from the right-click menu or the edit form (`⌘⌫`). Both ask for confirmation, and deletes carry the displayed version.
+- Entries with agent-reported usage show a small label such as `2.41M tokens · $31.40`; the edit form also shows the model.
 - Navigate days or weeks below the active timer to review your personal time. Management, team membership, project setup, and invoiced/paid status live in **Open web**.
 - Use the team menu to switch workspaces. Your one active timer remains visible across teams.
 - Settings includes account information, sync status, sign out, and Quit. The timer keeps running on the server when the window or app closes.
-- `⌘N` opens a new entry from the timesheet; `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management. These shortcuts apply while Crops is active.
+- `⌘N` opens a new entry from the timesheet; `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management. In the edit form, Return saves, Escape goes back, and `⌘⌫` deletes after confirmation. These shortcuts apply while Crops is active.
 
 ## Sync and reliability
 
 Elapsed time is accumulated completed seconds plus the absolute start timestamp, adjusted to the server clock. A suspended Mac doesn't pause the server timer. The app polls every 5 seconds while running and 15 seconds while idle, refetches on wake/focus and after mutations, and serializes user mutations. Conditional requests reuse the current snapshot when nothing changed, reducing network traffic while refreshing server-clock alignment. Stale reads are discarded if a mutation or account/team change supersedes them. HTTP is allowed only on loopback for local development; deployed servers require HTTPS. Redirects are rejected so credentials aren't forwarded to another origin.
 
-Offline reads keep their last state, with a visible warning. New mutations require the server and aren't silently queued. If a response is lost, the app refetches canonical state instead of automatically repeating the write. Retrying that same uncertain change uses its existing idempotency key, allowing the server to return its saved result without creating duplicate time. This version does not provide offline entry creation, a global system-wide shortcut, or automatic login-item registration. To start on login, add Crops under macOS **System Settings → General → Login Items**.
+Offline reads keep their last state, with a visible warning. New mutations require the server and aren't silently queued. If a response is lost, the app refetches canonical state instead of automatically repeating the write. Retrying that same uncertain change uses its existing idempotency key, allowing the server to return its saved result without creating duplicate time. Entry edits and deletes (PATCH/DELETE) are not replayed by idempotency key; the entry version rejects a stale or repeated change instead, and the app refetches rather than retrying. This version does not provide offline entry creation, a global system-wide shortcut, or automatic login-item registration. To start on login, add Crops under macOS **System Settings → General → Login Items**.
 
 ## Validation
 
@@ -45,4 +50,4 @@ CROPS_SMOKE_URL=http://127.0.0.1:8787 \
   apps/macos/.build/release/CropsCheck
 ```
 
-`CropsCheck` exercises the same native API client and Codable models used by the GUI. It requires a disposable account with at least one project and no running timer; it creates a 60-second manual entry and a timer entry, then checks start, stop, resume, elapsed persistence, and logout. It does not automate the GUI. See `VALIDATION.md` for the checks actually completed on the built artifact.
+`CropsCheck` exercises the same native API client and Codable models used by the GUI. It requires a disposable account with at least one project and no running timer; it creates a 60-second manual entry with agent usage, edits it, confirms stale edits/deletes are rejected, deletes it, then creates a timer entry and checks running-entry edit limits, start, stop, resume, elapsed persistence, deletion, and logout. It does not automate the GUI. See `VALIDATION.md` for the checks actually completed on the built artifact.

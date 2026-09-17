@@ -24,8 +24,15 @@ export async function verifyPassword(password, stored = dummyHash) {
   const expected = Buffer.from(key, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
+// Access keys are `crops_` + 43 base64url characters; sessions never use that prefix.
+export const isAccessKey = (value) => typeof value === 'string' && /^crops_[A-Za-z0-9_-]{32,250}$/.test(value);
+export function createAccessKey() {
+  const secret = `crops_${randomBytes(32).toString('base64url')}`;
+  return { secret, prefix: secret.slice(0, 12), hash: digest(secret) };
+}
 export async function createSession(tx, userId) {
-  const token = randomBytes(32).toString('base64url');
+  let token;
+  do token = randomBytes(32).toString('base64url'); while (isAccessKey(token));
   await tx.query('DELETE FROM sessions WHERE expires_at < now()');
   await tx.query('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,$3)', [digest(token), userId, new Date(Date.now() + 30 * 86400000)]);
   return token;

@@ -76,9 +76,11 @@ public final class CropsInstrumentation extends Instrumentation {
             for (int i = 0; i < repo.array("entries").length(); i++) { JSONObject entry = repo.array("entries").getJSONObject(i); if (entry.getString("task").equals("Native verification")) manual = entry; }
             require(manual != null && manual.getLong("durationSeconds") == 5400, "Manual duration remains exactly 90 minutes");
             final String resumeId = manual.getString("id");
+            editingChecks(activity, server, token, projectId, manual);
             runOnMainSync(() -> repo.start(projectId, "Native verification", "", true, resumeId));
             await(() -> !repo.busy && repo.running() != null && repo.running().optString("id").equals(resumeId), 20000, "Resume preserves the same time entry");
             require(repo.duration(repo.running()) >= 5400, "Resume includes accumulated duration");
+            runningEditChecks(activity, resumeId);
             runOnMainSync(() -> {
                 repo.persistentSync(true);
                 getTargetContext().startForegroundService(new Intent(getTargetContext(), TimerService.class));
@@ -103,6 +105,110 @@ public final class CropsInstrumentation extends Instrumentation {
             finish(Activity.RESULT_CANCELED, result);
         }
     }
+    private JSONObject entry(String id) {
+        org.json.JSONArray all = repo.array("entries");
+        for (int i = 0; i < all.length(); i++) { JSONObject entry = all.optJSONObject(i); if (entry != null && id.equals(entry.optString("id"))) return entry; }
+        return null;
+    }
+    private void editingChecks(Activity activity, String server, String token, String projectId, JSONObject manual) throws Exception {
+        MainActivity main = (MainActivity) activity;
+        final String id = manual.getString("id"); final int firstVersion = manual.getInt("version");
+        // Agent label parsing is tolerant of missing, null, partial, and malformed usage.
+        require(Repository.agentLabel(new JSONObject("{\"agent\":{\"tokens\":2410000,\"cost\":31.4,\"model\":\"claude-opus-5\"}}")).equals("2.41M tokens · $31.40")
+            && Repository.agentLabel(new JSONObject("{\"agent\":null}")).isEmpty() && Repository.agentLabel(new JSONObject("{}")).isEmpty()
+            && Repository.agentLabel(new JSONObject("{\"agent\":\"weird\"}")).isEmpty() && Repository.agentLabel(new JSONObject("{\"agent\":{\"tokens\":\"12\",\"cost\":2}}")).equals("$2.00")
+            && Repository.agentLabel(new JSONObject("{\"agent\":{\"tokens\":999999}}")).equals("1M tokens") && Repository.agentLabel(new JSONObject("{\"agent\":{\"tokens\":950,\"cost\":1234.5}}")).equals("950 tokens · $1,234.50"),
+            "Agent usage label parses tolerantly");
+        require(MainActivity.parseDuration("2:15") == 8100 && MainActivity.hoursMinutes(5400).equals("1:30"), "Edit uses the manual-entry duration parser");
+
+        // Native edit dialog: change duration and task, then Save sends PATCH with the displayed version.
+        waitForIdleSync();
+        runOnMainSync(() -> { View edit = findDescribed(activity.getWindow().getDecorView(), "Edit Native verification"); if (edit == null) throw new AssertionError("Native Edit control missing"); edit.performClick(); });
+        waitForIdleSync();
+        final java.util.List<android.widget.EditText> fields = new java.util.ArrayList<>();
+        runOnMainSync(() -> { if (main.entryDialog == null) throw new AssertionError("Edit dialog did not open"); collect(main.entryDialog.getWindow().getDecorView(), fields); });
+        require(fields.size() == 3 && fields.get(1).getText().toString().equals("1:30") && fields.get(1).isEnabled(), "Edit dialog is prefilled and duration is editable for stopped time");
+        runOnMainSync(() -> {
+            fields.get(0).setText("Native verification edited"); fields.get(1).setText("2:15"); fields.get(2).setText("Edited on Android");
+            main.entryDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();
+        });
+        await(() -> !repo.busy && entry(id) != null && entry(id).optLong("durationSeconds") == 8100 && entry(id).optString("task").equals("Native verification edited"), 20000, "Native Save persists PATCH edits");
+        require(entry(id).optInt("version") == firstVersion + 1 && entry(id).optString("notes").equals("Edited on Android") && entry(id).optString("date").equals(manual.getString("date")), "PATCH sends only changed fields and bumps the version");
+        await(() -> main.entryDialog == null, 5000, "Edit dialog closes after a confirmed save");
+
+        // A stale displayed version is rejected, state is refetched, and the error remains visible.
+        final int[] status = { -1 }; final String[] message = { "" };
+        runOnMainSync(() -> repo.edit(id, firstVersion, new JSONObjectBuilder().put("notes", "stale overwrite").json, (saved, code, text) -> { status[0] = saved ? 200 : code; message[0] = text; }));
+        await(() -> status[0] != -1 && !repo.busy, 20000, "Stale edit completes");
+        require(status[0] == 409 && message[0].contains("changed") && entry(id).optString("notes").equals("Edited on Android"), "Stale PATCH gets 409, keeps server data, and shows the error");
+        runOnMainSync(() -> repo.error = "");
+
+        // Stale DELETE is rejected too.
+        status[0] = -1;
+        runOnMainSync(() -> repo.delete(id, firstVersion, (saved, code, text) -> status[0] = saved ? 200 : code));
+        await(() -> status[0] != -1 && !repo.busy, 20000, "Stale delete completes");
+        require(status[0] == 409 && entry(id) != null, "Stale DELETE gets 409 and the entry remains");
+        runOnMainSync(() -> repo.error = "");
+
+        // Agent usage from the server renders on the entry card.
+        JSONObject usage = send("PATCH", server + "/api/entries/" + id, token, new JSONObject().put("version", entry(id).getInt("version")).put("agent", new JSONObject().put("tokens", 2410000).put("cost", 31.4).put("model", "claude-opus-5")));
+        require(usage.getJSONObject("entry").getJSONObject("agent").getLong("tokens") == 2410000, "Agent usage accepted by the API");
+        runOnMainSync(() -> repo.refresh());
+        await(() -> entry(id) != null && entry(id).optJSONObject("agent") != null, 20000, "Agent usage arrives in state");
+        waitForIdleSync(); Thread.sleep(300);
+        final boolean[] shown = { false };
+        runOnMainSync(() -> shown[0] = findText(activity.getWindow().getDecorView(), "2.41M tokens · $31.40"));
+        require(shown[0], "Entry card shows 2.41M tokens · $31.40");
+
+        // Native Delete with confirmation removes a second stopped entry.
+        runOnMainSync(() -> repo.manual(projectId, "Delete me", "", java.time.LocalDate.now().toString(), 600, false));
+        await(() -> !repo.busy && findTask("Delete me") != null, 20000, "Entry to delete persists");
+        final String doomed = findTask("Delete me").getString("id");
+        waitForIdleSync(); Thread.sleep(300);
+        runOnMainSync(() -> { View edit = findDescribed(activity.getWindow().getDecorView(), "Edit Delete me"); if (edit == null) throw new AssertionError("Edit control missing for deletable entry"); edit.performClick(); });
+        waitForIdleSync();
+        runOnMainSync(() -> main.entryDialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).performClick());
+        waitForIdleSync();
+        require(main.confirmDialog != null && main.confirmDialog.isShowing() && entry(doomed) != null, "Delete asks for confirmation before sending");
+        runOnMainSync(() -> main.confirmDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
+        await(() -> !repo.busy && entry(doomed) == null && main.entryDialog == null, 20000, "Confirmed native Delete removes the entry");
+        waitForIdleSync();
+    }
+    private void runningEditChecks(Activity activity, String id) throws Exception {
+        MainActivity main = (MainActivity) activity;
+        final int[] status = { -1 };
+        runOnMainSync(() -> repo.edit(id, repo.running().optInt("version"), new JSONObjectBuilder().put("durationSeconds", 60).json, (saved, code, text) -> status[0] = saved ? 200 : code));
+        await(() -> status[0] != -1 && !repo.busy, 20000, "Running duration edit completes");
+        require(status[0] == 409 && repo.running() != null, "Server rejects duration changes while running");
+        runOnMainSync(() -> repo.error = "");
+        waitForIdleSync(); Thread.sleep(300);
+        runOnMainSync(() -> { View edit = findDescribed(activity.getWindow().getDecorView(), "Edit Native verification"); if (edit == null) throw new AssertionError("Edit control missing for running entry"); edit.performClick(); });
+        waitForIdleSync();
+        final java.util.List<android.widget.EditText> fields = new java.util.ArrayList<>(); final boolean[] deleteShown = { true };
+        runOnMainSync(() -> {
+            collect(main.entryDialog.getWindow().getDecorView(), fields);
+            Button delete = main.entryDialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL); deleteShown[0] = delete != null && delete.getVisibility() == View.VISIBLE;
+        });
+        require(fields.size() == 3 && !fields.get(1).isEnabled() && fields.get(0).isEnabled() && !deleteShown[0], "Running entry dialog disables duration and hides Delete");
+        runOnMainSync(() -> { fields.get(0).setText("Running rename"); main.entryDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick(); });
+        await(() -> !repo.busy && repo.running() != null && repo.running().optString("task").equals("Running rename"), 20000, "Running entry task edit persists and the timer keeps running");
+    }
+    private static final class JSONObjectBuilder { final JSONObject json = new JSONObject(); JSONObjectBuilder put(String k, Object v) { try { json.put(k, v); } catch (Exception e) { throw new IllegalStateException(e); } return this; } }
+    private JSONObject findTask(String task) { org.json.JSONArray all = repo.array("entries"); for (int i = 0; i < all.length(); i++) { JSONObject e = all.optJSONObject(i); if (e != null && task.equals(e.optString("task"))) return e; } return null; }
+    private View findDescribed(View view, String prefix) {
+        if (view.getContentDescription() != null && view.getContentDescription().toString().startsWith(prefix) && view instanceof Button) return view;
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) { View found = findDescribed(((ViewGroup) view).getChildAt(i), prefix); if (found != null) return found; }
+        return null;
+    }
+    private boolean findText(View view, String value) {
+        if (view instanceof android.widget.TextView && ((android.widget.TextView) view).getText().toString().equals(value)) return true;
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) if (findText(((ViewGroup) view).getChildAt(i), value)) return true;
+        return false;
+    }
+    private void collect(View view, java.util.List<android.widget.EditText> out) {
+        if (view instanceof android.widget.EditText) out.add((android.widget.EditText) view);
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) collect(((ViewGroup) view).getChildAt(i), out);
+    }
     private void require(boolean condition, String label) { if (!condition) throw new AssertionError(label); checks++; Bundle progress = new Bundle(); progress.putString("stream", "PASS " + label + "\n"); sendStatus(0, progress); }
     private void await(BooleanSupplier condition, long timeout, String label) throws Exception {
         long deadline = System.currentTimeMillis() + timeout;
@@ -114,10 +220,11 @@ public final class CropsInstrumentation extends Instrumentation {
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) { Button button = findButton(((ViewGroup) view).getChildAt(i), contains); if (button != null) return button; }
         return null;
     }
-    private JSONObject post(String url, String token, JSONObject body) throws Exception {
+    private JSONObject post(String url, String token, JSONObject body) throws Exception { return send("POST", url, token, body); }
+    private JSONObject send(String method, String url, String token, JSONObject body) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         try {
-            connection.setRequestMethod("POST"); connection.setDoOutput(true); connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+            connection.setRequestMethod(method); connection.setDoOutput(true); connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
             connection.setRequestProperty("Authorization", "Bearer " + token); connection.setRequestProperty("Content-Type", "application/json");
             try (java.io.OutputStream output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
             if (connection.getResponseCode() >= 300) throw new AssertionError("Remote request failed: " + connection.getResponseCode());

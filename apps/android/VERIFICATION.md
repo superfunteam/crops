@@ -2,20 +2,29 @@
 
 ## Build and package
 
-- Clean `:app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest`: successful build and Android lint, **0 errors / 4 warnings**. Warnings concern the pinned Gradle version, legacy backup configuration, and English-only UI strings. Backups are disabled.
-- `./gradlew :app:assembleRelease`: successful R8 minification and resource shrinking; the release APK is unsigned.
-- `apksigner verify --verbose`: debug APK verifies with APK Signature Scheme v2.
-- Application ID: `com.crops.time`, version `1.0.1` (version code `2`), min SDK 26, target/compile SDK 36.
-- Distributable debug APK: **42,961 bytes**. No third-party runtime dependencies. The clean build removed unused ZIP padding present in the prior incremental APK; signing and debug build type are unchanged.
-- SHA-256: `1539ae84f710b01365722db0aba2562faeb22cbec9b75421a3554b8a34bdc06a`.
-- Signing-certificate SHA-256: `18e87aef297d389dfae90a1b88cfc4f93ff48cb759d8b48023ab9e1e27139831`, identical to the previously deployed version `1.0.0` APK.
+- Version `1.1.0` (version code `3`) adds entry editing, deletion, and the agent usage label.
+- Clean `./gradlew clean` then `bash build-apk.sh` (`:app:assembleDebug :app:lintDebug`): **BUILD SUCCESSFUL**, Android lint **0 errors / 4 warnings** — the same four as 1.0.1: pinned Gradle version, legacy backup configuration, and two English-only UI string warnings. Backups are disabled.
+- `:app:assembleDebugAndroidTest` and `:app:assembleRelease` (R8 minification and resource shrinking, unsigned): successful.
+- `apksigner verify --verbose`: debug APK verifies with APK Signature Scheme v2. Signing-certificate SHA-256 `18e87aef297d389dfae90a1b88cfc4f93ff48cb759d8b48023ab9e1e27139831`, unchanged from 1.0.0/1.0.1, so it installs over them.
+- Application ID `com.crops.time`, min SDK 26, target/compile SDK 36.
+- Distributable debug APK: **52,925 bytes**, SHA-256 `d450dd4b9775f40c04e65375330449da78025c0e083f35e0923e493b12cd954f`. No third-party runtime dependencies.
 - Identical copies in `artifacts/Crops-android.apk` and `web/public/downloads/Crops-android.apk`.
 
 ## Runtime
 
-Installed and launched on a Pixel 7 profile using the Android 15 / API 35 arm64 emulator. The instrumentation suite runs against an isolated real PGlite API on port 8789. Its full result is in `verification-device.txt`.
+Installed and launched on a Pixel 7 profile using the Android 15 / API 35 arm64 emulator. The instrumentation suite ran against an isolated, empty real PGlite API (`server/dev.mjs` on port 8790, reached as `http://10.0.2.2:8790`) with `./verify-device.sh`. Its full result is in `verification-device.txt`. It was run on a build from the same source as the distributed APK; the distributed APK was then rebuilt clean.
 
-All 21 checks passed, covering native registration, username/password login, Android Keystore session reload and encrypted storage, the actual native Start button, service creation, visible live chronometer, displayed Stop control, stale native Stop and retained old notification after a remote stop-and-resume, current notification Stop, manual 90-minute time entry, same-entry resume and accumulated duration, persistent idle service, remote start and stop while the activity is backgrounded, and logout credential removal.
+All **41 checks** passed (21 existing plus 20 for editing). The existing checks cover native registration, username/password login, Android Keystore session reload and encrypted storage, the actual native Start button, service creation, visible live chronometer, displayed Stop control, stale native Stop and retained old notification after a remote stop-and-resume, current notification Stop, manual 90-minute time entry, same-entry resume and accumulated duration, persistent idle service, remote start and stop while the activity is backgrounded, and logout credential removal.
+
+### Editing and deletion
+
+- Native edit dialog opens from the entry's labelled Edit button, is prefilled (duration `1:30`), and Save persists a real `PATCH` through Android's `HttpURLConnection` — task, notes, and a 2:15 duration — bumping the version by exactly one and leaving the date unchanged (only changed fields are sent). The dialog closes after the confirmed save.
+- A PATCH and a DELETE with a stale version each receive 409 `This entry changed on another device`, leave the server data intact, refetch state, and return the visible error.
+- A running entry: the server rejects a duration change (409 `timer_running`); the native dialog disables duration/date and hides Delete; a task rename persists while the timer keeps running.
+- Native Delete shows a confirmation dialog without sending anything; confirming removes the entry.
+- Agent usage set through the API arrives in state and the entry card shows `2.41M tokens · $31.40`. Label parsing ignores `agent:null`, a missing or string `agent`, and string numbers, and formats `999999` as `1M tokens` and `$1,234.50`.
+
+A manual visual pass on the emulator (signed in to the same local API) confirmed the timesheet card with the agent pill and 48dp Resume/Edit buttons, the Edit dialog (Delete in red, Cancel, Save changes, agent model line), and the read-only invoiced dialog with its lock reason and only a Close button. TalkBack itself was not exercised; content descriptions were checked through the view hierarchy.
 
 The stale-action checks retain the original UI button and notification PendingIntent, stop and resume the same entry through another API client, then invoke those old controls. Both receive a version conflict and leave the resumed timer running. The refreshed notification successfully stops it.
 

@@ -2,7 +2,7 @@ Performing Streamed Install
 Success
 Performing Streamed Install
 Success
-PASS Native registration and workspace load:
+PASS Native registration and workspace load: 
 PASS Android Keystore session survives repository reload
 PASS Session is encrypted on disk
 PASS Start timer through native button
@@ -15,8 +15,28 @@ PASS Old notification retains its version and cannot stop a remotely resumed ent
 PASS Notification Stop action persists on the server
 PASS Manual entry persists
 PASS Manual duration remains exactly 90 minutes
+PASS Agent usage label parses tolerantly
+PASS Edit uses the manual-entry duration parser
+PASS Edit dialog is prefilled and duration is editable for stopped time
+PASS Native Save persists PATCH edits
+PASS PATCH sends only changed fields and bumps the version
+PASS Edit dialog closes after a confirmed save
+PASS Stale edit completes — This entry changed on another device. Refresh and try again.
+PASS Stale PATCH gets 409, keeps server data, and shows the error
+PASS Stale delete completes — This entry changed on another device. Refresh and try again.
+PASS Stale DELETE gets 409 and the entry remains
+PASS Agent usage accepted by the API
+PASS Agent usage arrives in state
+PASS Entry card shows 2.41M tokens · $31.40
+PASS Entry to delete persists
+PASS Delete asks for confirmation before sending
+PASS Confirmed native Delete removes the entry
 PASS Resume preserves the same time entry
 PASS Resume includes accumulated duration
+PASS Running duration edit completes — Stop this timer before changing its duration, date, or billing status.
+PASS Server rejects duration changes while running
+PASS Running entry dialog disables duration and hides Delete
+PASS Running entry task edit persists and the timer keeps running
 PASS Stop before cross-device synchronization
 PASS Idle cross-device service stays active
 PASS Background service discovers a remotely started timer
@@ -24,4 +44,4 @@ PASS Remote Stop synchronizes back to Android
 PASS Logout clears secure credentials
 PASS Existing username/password sign-in succeeds
 
-OK (21 checks)
+OK (41 checks)
