@@ -47,6 +47,14 @@ export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
         <Pitch />
       </section>
       <main className="auth-main">
+        <nav className="auth-apps" aria-label="Download the apps">
+          <a href="/downloads/Crops-macOS.zip" download>
+            <AppleIcon /> macOS
+          </a>
+          <a href="/downloads/Crops-android.apk" download>
+            <AndroidIcon /> Android
+          </a>
+        </nav>
         <div className="auth-form">
           <div className="mobile-brand">
             <Brand />
@@ -145,5 +153,28 @@ export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
         </div>
       </main>
     </div>
+  );
+}
+
+function AppleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.7-.1 0-2.5-1-2.5-3.7zM14.1 5.8c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2.1-.5 2.7-1.3z" />
+    </svg>
+  );
+}
+function AndroidIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path d="M3.5 18a8.5 8.5 0 0 1 17 0z" fill="currentColor" />
+      <path
+        d="M7.6 10.4 5.6 7.2M16.4 10.4l2-3.2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <circle cx="8.6" cy="14.4" r="1.05" fill="#fff" />
+      <circle cx="15.4" cy="14.4" r="1.05" fill="#fff" />
+    </svg>
   );
 }

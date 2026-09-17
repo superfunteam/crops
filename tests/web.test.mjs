@@ -160,3 +160,35 @@ test("Harvest pricing kit reproduces a real Harvest renewal", async () => {
     [948, 5124, 22344],
   );
 });
+test("blog Markdown renders headings, tables, quotes and inline formatting", async () => {
+  const { markdownToHtml } = await import("../web/src/markdown.ts");
+  const html = markdownToHtml(
+    [
+      "# Title",
+      "",
+      "Some **bold** and _quiet_ text with [a link](https://crops.wims.vc) & <tags>.",
+      "",
+      "| Plan | Price |",
+      "| --- | ---: |",
+      "| Solo | $12 |",
+      "",
+      "> A quote.",
+      "",
+      "- one",
+      "- two",
+      "",
+      "---",
+    ].join("\n"),
+  );
+  assert.equal(
+    html,
+    [
+      "<h1>Title</h1>",
+      '<p>Some <strong>bold</strong> and <em>quiet</em> text with <a href="https://crops.wims.vc" rel="noopener">a link</a> &amp; &lt;tags&gt;.</p>',
+      '<div class="table"><table><thead><tr><th>Plan</th><th class="right">Price</th></tr></thead><tbody><tr><td>Solo</td><td class="right">$12</td></tr></tbody></table></div>',
+      "<blockquote><p>A quote.</p></blockquote>",
+      "<ul><li>one</li><li>two</li></ul>",
+      "<hr>",
+    ].join("\n"),
+  );
+});

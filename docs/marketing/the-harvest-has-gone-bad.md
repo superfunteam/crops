@@ -122,7 +122,7 @@ Usage-based pricing isn't evil on its own terms. But look at what Harvest chose 
 
 Harvest used to promise that growth was free. That promise was the product.
 
-**Crops is at [crops.wims.vc](https://crops.wims.vc).** Good work. Room to grow.
+**Crops is at [crops.wims.vc](https://crops.wims.vc).** Free time tracking. Room to grow.
 
 ---
 

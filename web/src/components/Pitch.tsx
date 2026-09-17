@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
+  UserRound,
   Laptop,
   Smartphone,
   Sprout,
@@ -15,7 +17,8 @@ import {
 } from "../harvestPricing";
 import { money, time } from "../lib";
 
-const SLIDES = ["Crops", "Features", "Pricing"];
+const SLIDES = ["Crops", "Features", "Pricing", "Agents"];
+export const HARVEST_POST = "/blog/the-harvest-has-gone-bad/";
 const AUTO_ADVANCE_MS = 9000;
 const SHUFFLE_MS = 3200;
 const reducedMotion = () =>
@@ -88,9 +91,10 @@ export function Pitch() {
         onWheel={(e) => Math.abs(e.deltaX) > 4 && setStopped(true)}
       >
         {[
-          <HeroSlide key="hero" onPricing={() => interact(2)} />,
+          <HeroSlide key="hero" />,
           <FeatureSlide key="features" />,
           <PricingSlide key="pricing" />,
+          <AgentSlide key="agents" />,
         ].map((slide, index) => (
           <div
             key={SLIDES[index]}
@@ -147,7 +151,7 @@ export function Pitch() {
   );
 }
 
-function HeroSlide({ onPricing }: { onPricing: () => void }) {
+function HeroSlide() {
   return (
     <div className="auth-message pitch-hero">
       <div className="eyebrow">Free open source alternative to Harvest</div>
@@ -161,11 +165,10 @@ function HeroSlide({ onPricing }: { onPricing: () => void }) {
         price.
       </p>
       <LiveTimer />
-      <button type="button" className="pitch-link" onClick={onPricing}>
-        Always free for every client, project and teammate. See what Harvest
-        charges
-        <ArrowRight size={14} />
-      </button>
+      <p className="pitch-link">
+        Always free for every client, project and teammate.{" "}
+        <a href={HARVEST_POST}>See what Harvest charges</a>
+      </p>
     </div>
   );
 }
@@ -355,6 +358,70 @@ function PricingSlide() {
       <p className="pitch-fineprint">
         Per year. Harvest billed yearly before tax, at rates from its own
         billing simulator, September 2026.
+      </p>
+    </div>
+  );
+}
+
+// Blended agent spend for the demo: roughly $13 per million tokens.
+const TOKEN_COST_PER_MILLION = 13;
+const HOURLY_RATE = 150;
+const AGENT_WAYS: [string, boolean][] = [
+  ["REST API", false],
+  ["Agent hooks", false],
+  ["Log after the fact", false],
+  ["MCP server", true],
+  ["Token expenses", true],
+];
+
+function AgentSlide() {
+  const [started] = useState(() => Date.now());
+  const elapsed = (useTick() - started) / 1000;
+  const humanSeconds = 3 * 3600 + 20 * 60 + elapsed;
+  const tokens = 2_412_000 + Math.floor(elapsed * 1850);
+  const human = (humanSeconds / 3600) * HOURLY_RATE;
+  const agent = (tokens / 1_000_000) * TOKEN_COST_PER_MILLION;
+  return (
+    <div className="pitch-panel">
+      <div className="eyebrow">API and MCP for agents</div>
+      <h2>Get your agent paid by the client, too.</h2>
+      <div className="pitch-agent">
+        <div className="pitch-agent-head">
+          <span className="live-dot" />
+          <span>Northwind · Website refresh</span>
+          <code>hook → timer.start</code>
+        </div>
+        <div className="pitch-agent-row">
+          <span>
+            <UserRound size={13} /> Your time
+          </span>
+          <span>{time(humanSeconds, true)}</span>
+          <strong>{money(human)}</strong>
+        </div>
+        <div className="pitch-agent-row">
+          <span>
+            <Bot size={13} /> Agent tokens
+          </span>
+          <span>{(tokens / 1_000_000).toFixed(2)}M</span>
+          <strong>{money(agent)}</strong>
+        </div>
+        <div className="pitch-agent-total">
+          <span>Billable to client</span>
+          <span className="status unbilled">Unbilled</span>
+          <strong>{money(human + agent)}</strong>
+        </div>
+      </div>
+      <div className="pitch-agent-ways">
+        {AGENT_WAYS.map(([label, soon]) => (
+          <span key={label} className="pitch-chip">
+            {label}
+            {soon && <em>Soon</em>}
+          </span>
+        ))}
+      </div>
+      <p className="pitch-fineprint">
+        Start, stop and log time with a bearer token today. Soon, agents can
+        attach the tokens and cost they report to each entry.
       </p>
     </div>
   );
