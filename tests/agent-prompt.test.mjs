@@ -61,24 +61,17 @@ test("generated agent prompt posts usage to its chosen client without touching t
       prompt.includes("do not overlap or exceed the actual subscription cost"),
     );
   }
-  const subscription = {
-    plan: "Example plan",
-    feeUsd: 200,
-    periodStart: "2026-09-01",
-    periodEnd: "2026-10-01",
-    scope: "individual",
-    capacityHours: 100,
-  };
-  const configured = buildAgentPrompt({ ...config, subscription });
-  const embedded = JSON.parse(
-    configured.match(/repeat or reconfirm them:\n(\{[\s\S]*?\})/)[1],
-  );
-  for (const [key, value] of Object.entries(subscription))
-    assert.equal(embedded[key], value);
+  const configured = buildAgentPrompt({ ...config, monthlyPriceUsd: 200 });
+  assert.ok(configured.includes("Monthly subscription price: USD 200"));
+  assert.ok(configured.includes("active agent hours / 160"));
   assert.ok(
-    configured.includes("mark caps/remaining capacity unknown and proceed"),
+    configured.includes("do not ask them to approve a capacity budget"),
   );
-  assert.ok(!configured.includes("No subscription details were supplied"));
+  assert.ok(
+    buildAgentPrompt({ ...config, monthlyPriceUsd: 0 }).includes(
+      "Monthly subscription price: USD 0",
+    ),
+  );
   const prompt = buildAgentPrompt(config);
   const payload = JSON.parse(prompt.match(/```json\n([\s\S]*?)\n```/)[1]);
   payload.agent = { tokens: 12500, cost: 0.14, model: "test-model" };
