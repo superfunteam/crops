@@ -147,3 +147,9 @@ Run local backend tests with `node --test tests/api.test.mjs`. For real PostgreS
 Project rates are current estimates, not a historical billing ledger. Changing a project's rate changes the displayed value of its past entries; invoiced/paid statuses remain recorded, but no historical invoice amount, invoice number, currency conversion, or immutable financial audit trail is stored. Invoicing remains in the bank.
 
 Implementation references: [PGlite API](https://pglite.dev/docs/api), [Netlify Functions API](https://docs.netlify.com/build/functions/api/), [node-postgres transactions](https://node-postgres.com/features/transactions).
+
+### Copyable agent instructions
+
+Settings → Agent usage tracking generates a prompt or downloadable `SKILL.md` for the current team, selected client/project, and reporting trigger (push to main, session end, completed task, PR update, or manual request). Preferences are saved per user/team in the current browser; copy the prompt again after changing them. This is an instruction generator, not an installed runtime hook.
+
+The agent supplies `CROPS_ACCESS_KEY` privately and posts to `/api/hooks` with Bearer authentication. Reports use `action: log` and zero duration, preserving human hours and active timers. Non-billable is the default; users can explicitly include reported cost in billing. Instructions distinguish measured usage from estimates, require a pricing source, account for nonoverlapping usage windows, and explain Crops’ 24-hour idempotency retention. No model prices or secrets are embedded in the generated prompt.

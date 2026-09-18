@@ -12,6 +12,7 @@ import type { AccessKey, Snapshot } from "../types";
 import type { Editor } from "../components/Editors";
 import { Field, Modal, PageHeading } from "../components/UI";
 import { api } from "../api";
+import { AgentTracking } from "../components/AgentTracking";
 const shortDate = (value: string) =>
   new Date(value).toLocaleDateString(undefined, {
     month: "short",
@@ -258,6 +259,7 @@ export function SettingsPage({
           </button>
         </div>
       </section>
+      <AgentTracking key={`${s.user.id}:${s.team.id}`} s={s} />
       <AccessKeys s={s} />
       <section className="settings-section">
         <h2>Take your timer with you</h2>

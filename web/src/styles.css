@@ -3226,3 +3226,15 @@ small,
     padding: 28px 22px;
   }
 }
+
+.agent-tracking .form-grid { margin: 24px 0; }
+.agent-prompt-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.agent-prompt-actions [role="status"] { font-size: 13px; }
+.agent-prompt-preview { margin-top: 20px; }
+.agent-prompt-preview summary { cursor: pointer; font-weight: 500; }
+.agent-prompt-preview textarea { width: 100%; min-height: 320px; margin-top: 14px; resize: vertical; font: 12px/1.65 ui-monospace, monospace; }
+.agent-prompt-note { margin-top: 20px; font-size: 12px; }
+@media (max-width: 600px) {
+  .agent-tracking .form-grid { grid-template-columns: 1fr; }
+  .agent-tracking select, .agent-prompt-preview textarea { font-size: 16px; }
+}
