@@ -171,6 +171,7 @@ function Footnote({ children, style }: { children: ReactNode; style?: CSSPropert
 }
 
 const RATE = 150;
+const CARD_HEIGHT = 760;
 const HUMAN_MINUTES = 45;
 const AGENT_MINUTES = 27;
 const AGENT_TOKENS = "184K";
@@ -198,6 +199,9 @@ function Terminal() {
     <div
       style={{
         width: 900,
+        height: CARD_HEIGHT,
+        display: "flex",
+        flexDirection: "column",
         borderRadius: 44,
         background: "#111814",
         border: "3px solid rgba(255,255,255,0.08)",
@@ -211,7 +215,7 @@ function Terminal() {
           <span key={c} style={{ width: 28, height: 28, borderRadius: "50%", background: c }} />
         ))}
       </div>
-      <div style={{ padding: "44px 52px 54px", fontSize: 42, lineHeight: 1.7, whiteSpace: "pre" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 52px 10px", fontSize: 42, lineHeight: 1.7, whiteSpace: "pre" }}>
         {TERMINAL.map(([lead, text, kind], i) => (
           <div key={i} style={{ marginTop: i === 1 ? 24 : 0 }}>
             <span style={{ color: kind === "prompt" ? COLORS.lime : kind === "dim" || kind === "logged" ? "#5c6b5f" : "#9fd67a" }}>
@@ -265,7 +269,7 @@ function EntryRow({ agent = false }: { agent?: boolean }) {
     <div style={{ display: "flex", alignItems: "center", gap: 28, padding: "34px 44px" }}>
       <PersonIcon agent={agent} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 44, fontWeight: 650, letterSpacing: "-0.03em" }}>{agent ? "Agent" : "You"}</div>
+        <div style={{ fontSize: 44, fontWeight: 650, letterSpacing: "-0.03em" }}>{agent ? "Agent" : "Human"}</div>
         <div style={{ marginTop: 10 }}>
           {agent ? (
             <Tag strong>{`${AGENT_TOKENS} tokens · $${AGENT_COST.toFixed(2)}`}</Tag>
@@ -290,6 +294,9 @@ function CropsEntry() {
     <div
       style={{
         width: 920,
+        height: CARD_HEIGHT,
+        display: "flex",
+        flexDirection: "column",
         borderRadius: 52,
         background: "#fbfaf5",
         color: COLORS.ink,
@@ -311,7 +318,7 @@ function CropsEntry() {
       <EntryRow />
       <div style={{ height: 3, background: "rgba(39,53,40,0.08)", margin: "0 44px" }} />
       <EntryRow agent />
-      <div style={{ display: "flex", alignItems: "center", gap: 22, padding: "36px 44px 40px", background: "#f1f0e7" }}>
+      <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 22, padding: "36px 44px 40px", background: "#f1f0e7" }}>
         <span style={{ transform: "scale(1.3)", transformOrigin: "left center", marginRight: 50 }}>
           <Status status="unbilled" />
         </span>
@@ -348,8 +355,8 @@ export function ShareAgents() {
     <Green style={{ width: SHARE.width, height: SHARE.height, fontFamily: FONT }}>
       <AbsoluteFill style={{ padding: "90px 110px", color: "#f3f5e8" }}>
         <div style={{ fontSize: 40, color: COLORS.lime, fontWeight: 500 }}>Crops for agents · API + MCP</div>
-        <div style={{ fontSize: 100, fontWeight: 560, letterSpacing: "-0.025em", wordSpacing: "0.06em", marginTop: 14, lineHeight: 1.05 }}>
-          Bill the human and the agent.
+        <div style={{ fontSize: 94, fontWeight: 560, letterSpacing: "-0.025em", wordSpacing: "0.06em", marginTop: 14, whiteSpace: "nowrap", lineHeight: 1.05 }}>
+          Time is human. Time is agent. Time is money.
         </div>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 30 }}>
           <Terminal />
