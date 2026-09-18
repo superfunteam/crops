@@ -62,12 +62,14 @@ function PriceCard({
   note,
   tone,
   logo = false,
+  priceSize = 204,
 }: {
   name: string;
   price: string;
   note: string;
   tone: "harvest" | "crops";
   logo?: boolean;
+  priceSize?: number;
 }) {
   const accent = tone === "harvest" ? COLORS.harvest : COLORS.forest;
   return (
@@ -91,8 +93,14 @@ function PriceCard({
       <div
         style={{
           marginTop: 70,
-          fontSize: 204,
+          fontSize: priceSize,
           lineHeight: 0.95,
+          whiteSpace: "nowrap",
+          position: "relative",
+          zIndex: 2,
+          // A card-colored outline keeps the overflowing price legible on any background.
+          WebkitTextStroke: "18px #fffdf8",
+          paintOrder: "stroke fill",
           fontWeight: 600,
           letterSpacing: "-0.06em",
           color: accent,
@@ -121,14 +129,14 @@ export function SharePrice() {
           position: "relative",
         }}
       >
-        <PriceCard name="Harvest" price={usd(HARVEST_UNLIMITED)} note="2-person team · billed yearly" tone="harvest" />
+        <PriceCard name="Harvest" price="$19k" priceSize={440} note={`${usd(HARVEST_UNLIMITED)} · 2-person team · billed yearly`} tone="harvest" />
         <Footnote style={{ left: 64, color: "rgba(255,255,255,0.82)" }}>
           Harvest “Unlimited” quote for 2 seats, before tax · Sept 2026
         </Footnote>
       </div>
       <Green style={{ flex: 1, display: "grid", placeItems: "center" }}>
         <div style={{ position: "relative" }}>
-          <PriceCard name="Crops" price="$0" note="Any team size · free forever" tone="crops" logo />
+          <PriceCard name="Crops" price="$0" priceSize={440} note="Any team size · free forever" tone="crops" logo />
         </div>
         <Footnote style={{ right: 64, color: "#c9dba2", fontWeight: 600 }}>crops.wims.vc</Footnote>
       </Green>
@@ -136,7 +144,7 @@ export function SharePrice() {
         style={{
           position: "absolute",
           left: "50%",
-          top: "50%",
+          top: "82%",
           transform: "translate(-50%, -50%)",
           width: 170,
           height: 170,
@@ -150,6 +158,7 @@ export function SharePrice() {
           letterSpacing: "-0.04em",
           color: COLORS.ink,
           boxShadow: "0 30px 60px rgba(20,24,18,0.3)",
+          zIndex: 5,
         }}
       >
         vs
@@ -344,37 +353,21 @@ export function ShareArmAndLegs() {
   const orange = { color: COLORS.harvest };
   return (
     <Green style={{ width: SHARE.width, height: SHARE.height, fontFamily: FONT }}>
-      <div
-        style={{
-          position: "absolute",
-          right: -30,
-          bottom: -420,
-          fontSize: 1040,
-          fontWeight: 700,
-          letterSpacing: "-0.07em",
-          lineHeight: 1,
-          color: COLORS.harvest,
-          opacity: 0.95,
-          whiteSpace: "nowrap",
-        }}
-      >
-        $19k
-      </div>
-      <AbsoluteFill style={{ padding: "130px 130px", justifyContent: "flex-start" }}>
+      <AbsoluteFill style={{ padding: "90px 130px 250px", justifyContent: "center" }}>
         <div
           style={{
-            fontSize: 168,
+            fontSize: 200,
             fontWeight: 560,
             letterSpacing: "-0.03em",
             wordSpacing: "0.04em",
             lineHeight: 1.04,
             color: "#f3f5e8",
-            maxWidth: 1900,
+            maxWidth: 2140,
             textShadow: "0 8px 40px rgba(12,32,22,0.35)",
           }}
         >
           Private equity thinks time tracking should cost{" "}
-          <span style={orange}>an arm and both legs.</span>
+          <span style={{ ...orange, whiteSpace: "nowrap" }}>an arm and both legs.</span>
         </div>
       </AbsoluteFill>
       <div
