@@ -214,3 +214,16 @@ test("billable amounts add agent-reported cost on top of hours × rate", async (
   assert.equal(tokens(1500), "1.5K tokens");
   assert.equal(tokens(999999), "1M tokens");
 });
+
+test("agent work titles display legacy task summaries without changing notes", async () => {
+  const { agentWorkTitle } = await import("../web/src/lib.ts");
+  assert.equal(
+    agentWorkTitle("Agent usage: wordchat.fun/embed page and embed studio"),
+    "wordchat.fun/embed page and embed studio",
+  );
+  assert.equal(
+    agentWorkTitle("Embed page and studio"),
+    "Embed page and studio",
+  );
+  assert.equal(agentWorkTitle("Agent usage"), "Agent work");
+});

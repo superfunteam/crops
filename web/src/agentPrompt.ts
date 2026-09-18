@@ -47,7 +47,7 @@ export function agentPayload(config: AgentPromptConfig) {
     timezone: config.timezone,
     durationSeconds: 0,
     billable: config.billable,
-    task: "Agent usage",
+    task: "REPLACE_WITH_SHORT_WORK_TITLE",
     notes:
       "REPLACE: work summary; measured/estimated; usage window; event ID; subscription/period; allocation basis/share; caps and remaining capacity; assumptions",
     agent: { tokens: 0, cost: 0, model: "REPLACE_WITH_ACTUAL_MODEL" },
@@ -82,7 +82,7 @@ First check whether CROPS_ACCESS_KEY is already configured without printing its 
 5. When available, record relevant caps/windows, used and remaining capacity, reset times, throttling and throughput/concurrency constraints (“bandwidth”), with observation time and source. Mark missing information unknown. Account-wide changes may include other sessions. A weekly-cap percentage is NOT the same percentage of a monthly subscription. Never add overlapping cap percentages or subtract across resets. These observations are context only and do not alter the simple cost estimate.
 6. Label every cost ESTIMATED ALLOCATED SUBSCRIPTION COST. For example, USD 200/month and two active hours gives USD 2.50 (200 × 2 / 160). Keep a private monthly ledger across known clients/sessions so slices do not overlap or exceed the actual subscription cost. Cap each new allocation at the unallocated remainder of that monthly price. If other agents’ allocations are not visible, label coverage incomplete; do not claim a global cap is enforced by Crops. Leave unused capacity unallocated, and never charge the full monthly price on each trigger. Use the same pool for models on the same subscription. Exclude separately paid overages. Report zero only for a zero-priced plan, exhausted monthly allocation, or a real sub-cent rounding result—not because the plan is unlimited.
 7. Preserve unrounded estimates in your ledger, round the reported cost to two decimals, and include monthly price, active hours, the 160-hour assumption, calendar month, vendor/model, and estimation status in notes. These are estimates for review, not exact provider invoices. Crops requires tokens and cost together; retain incomplete observations locally rather than inventing values.
-8. Report a nonnegative whole token count (maximum 1,000,000,000,000), cost from 0 to 1,000,000 USD with at most two decimals, and model name(s) up to 100 characters. For multiple models, aggregate once and include the breakdown in notes. Keep task under 200 characters and notes under 4,000 characters. Send only a short work summary and usage metadata, never source code, conversation transcripts, credentials, or private file contents.
+8. Report a nonnegative whole token count (maximum 1,000,000,000,000), cost from 0 to 1,000,000 USD with at most two decimals, and model name(s) up to 100 characters. For multiple models, aggregate once and include the breakdown in notes. Use task for a short, specific work title (ideally under 80 characters; maximum 200), for example "Embed page and studio". Do not prefix it with "Agent usage:" or put token counts/cost in it: Crops supplies the Agent Usage pill. The timesheet displays this task title below the pill. Put the longer work summary, model/vendor, telemetry, allocation math, assumptions, and report ID in notes (maximum 4,000 characters), visible in the entry’s Agent details editor and exports. Do not create a separate Notes entry or move the long details into task. Send only a short work summary and usage metadata, never source code, conversation transcripts, credentials, or private file contents.
 
 ## Send one usage entry
 POST ${config.origin}/api/hooks
@@ -91,7 +91,7 @@ Headers:
   Content-Type: application/json
   Idempotency-Key: <unique stable ID for this usage window>
 
-Use this JSON shape. REPLACE the example tokens, cost, model, and notes with your measured/estimated values; never send this example unchanged:
+Use this JSON shape. REPLACE the example task, tokens, cost, model, and notes with your measured/estimated values; never send this example unchanged:
 \`\`\`json
 ${JSON.stringify(agentPayload(config), null, 2)}
 \`\`\`

@@ -56,6 +56,9 @@ export const tokens = (n: number) =>
   `${new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(n)} tokens`;
 export const agentLabel = (e: Pick<Entry, "agent">) =>
   e.agent ? `${tokens(e.agent.tokens)} · ${money(e.agent.cost)}` : "";
+// Older agents prefixed the task title; keep stored history intact.
+export const agentWorkTitle = (task: string) =>
+  task.replace(/^agent\s+usage\s*(?::\s*|$)/i, "").trim() || "Agent work";
 // Billable entries bill hours × rate plus the agent's self-reported cost.
 export function entryAmount(
   e: Pick<Entry, "billable" | "agent" | "durationSeconds" | "startedAt">,
@@ -73,7 +76,11 @@ export function clientName(s: Snapshot, p?: Project) {
   return s.clients.find((c) => c.id === p?.clientId)?.name || "Internal";
 }
 export function personName(s: Snapshot, id: string) {
-  return s.members.find((m) => m.userId === id)?.name || s.formerMembers?.find((m) => m.id === id)?.name || "Former member";
+  return (
+    s.members.find((m) => m.userId === id)?.name ||
+    s.formerMembers?.find((m) => m.id === id)?.name ||
+    "Former member"
+  );
 }
 export const initials = (name: string) =>
   name

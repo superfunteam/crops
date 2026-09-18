@@ -205,21 +205,28 @@ export function Editors({
                     ))}
                 </Select>
               </Field>
-              <Field label="Task">
+              <Field label={entry?.agent ? "Work title" : "Task"}>
                 <input
                   name="task"
                   defaultValue={entry?.task || "Build"}
                   list="tasks"
-                  maxLength={120}
+                  maxLength={200}
                   required
                 />
               </Field>
-              <Field label="Notes">
+              <Field
+                label={entry?.agent ? "Agent details" : "Notes"}
+                hint={
+                  entry?.agent
+                    ? "Full work notes, usage estimates, and subscription allocation details. The timesheet shows the work title."
+                    : undefined
+                }
+              >
                 <textarea
                   name="notes"
                   defaultValue={entry?.notes}
                   placeholder="What did you work on?"
-                  rows={3}
+                  rows={entry?.agent ? 8 : 3}
                   maxLength={4000}
                 />
               </Field>
