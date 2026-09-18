@@ -1,6 +1,6 @@
 import { Composition, Still } from "remotion";
 import { Launch } from "./Launch";
-import { SHARE, ShareAgents, SharePrice } from "./stills";
+import { SHARE, ShareAgents, ShareArmAndLegs, SharePrice } from "./stills";
 import { DURATION, FPS } from "./timeline";
 
 export const Root = () => (
@@ -15,5 +15,6 @@ export const Root = () => (
     />
     <Still id="SharePrice" component={SharePrice} {...SHARE} />
     <Still id="ShareAgents" component={ShareAgents} {...SHARE} />
+    <Still id="ShareArmAndLegs" component={ShareArmAndLegs} {...SHARE} />
   </>
 );

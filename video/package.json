@@ -8,7 +8,7 @@
     "beats": "python3 scripts/analyze-beats.py public/soundtrack.mp3 60",
     "render": "remotion render src/index.ts CropsLaunch out/crops-launch.mp4 --codec=h264 --crf=16 --audio-bitrate=320k",
     "still": "remotion still src/index.ts CropsLaunch out/still.png",
-    "share": "remotion still src/index.ts SharePrice ../docs/marketing/share/harvest-vs-crops-price.png && remotion still src/index.ts ShareAgents ../docs/marketing/share/agents-on-the-bill.png"
+    "share": "remotion still src/index.ts SharePrice ../docs/marketing/share/harvest-vs-crops-price.png && remotion still src/index.ts ShareAgents ../docs/marketing/share/agents-on-the-bill.png && remotion still src/index.ts ShareArmAndLegs ../docs/marketing/share/arm-and-both-legs.png"
   },
   "dependencies": {
     "@remotion/cli": "4.0.525",

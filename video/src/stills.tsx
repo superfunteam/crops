@@ -339,3 +339,65 @@ export function ShareAgents() {
     </Green>
   );
 }
+
+export function ShareArmAndLegs() {
+  const orange = { color: COLORS.harvest };
+  return (
+    <Green style={{ width: SHARE.width, height: SHARE.height, fontFamily: FONT }}>
+      <div
+        style={{
+          position: "absolute",
+          right: -30,
+          bottom: -420,
+          fontSize: 1040,
+          fontWeight: 700,
+          letterSpacing: "-0.07em",
+          lineHeight: 1,
+          color: COLORS.harvest,
+          opacity: 0.95,
+          whiteSpace: "nowrap",
+        }}
+      >
+        $19k
+      </div>
+      <AbsoluteFill style={{ padding: "130px 130px", justifyContent: "flex-start" }}>
+        <div
+          style={{
+            fontSize: 168,
+            fontWeight: 560,
+            letterSpacing: "-0.03em",
+            wordSpacing: "0.04em",
+            lineHeight: 1.04,
+            color: "#f3f5e8",
+            maxWidth: 1900,
+            textShadow: "0 8px 40px rgba(12,32,22,0.35)",
+          }}
+        >
+          Private equity thinks time tracking should cost{" "}
+          <span style={orange}>an arm and both legs.</span>
+        </div>
+      </AbsoluteFill>
+      <div
+        style={{
+          position: "absolute",
+          left: 130,
+          bottom: 110,
+          display: "flex",
+          alignItems: "center",
+          gap: 22,
+          padding: "18px 34px 18px 18px",
+          borderRadius: 999,
+          background: "rgba(251,250,245,0.96)",
+          boxShadow: "0 24px 60px rgba(6,18,12,0.35)",
+        }}
+      >
+        <Img src={staticFile("crops.svg")} style={{ width: 76, height: 76, borderRadius: 22 }} />
+        <span style={{ fontSize: 50, fontWeight: 650, letterSpacing: "-0.04em", color: COLORS.ink }}>
+          crops<span style={{ color: "#8aa65a" }}>.</span>
+        </span>
+        <span style={{ width: 2, height: 44, background: "rgba(39,53,40,0.15)" }} />
+        <span style={{ fontSize: 36, fontWeight: 500, color: COLORS.forest }}>Free time tracking</span>
+      </div>
+    </Green>
+  );
+}
