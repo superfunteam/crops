@@ -50,7 +50,16 @@ test("generated agent prompt posts usage to its chosen client without touching t
     assert.ok(prompt.includes(agentTriggers[trigger].instruction));
     assert.ok(prompt.includes(JSON.stringify(config.clientName)));
     assert.ok(prompt.includes("24 hours"));
-    assert.ok(prompt.includes("API-equivalent estimate"));
+    assert.ok(prompt.includes("ALLOCATED SUBSCRIPTION COST"));
+    assert.ok(
+      prompt.includes(
+        "A weekly-cap percentage is NOT the same percentage of a monthly subscription",
+      ),
+    );
+    assert.ok(prompt.includes("Never substitute API token prices"));
+    assert.ok(
+      prompt.includes("do not overlap or exceed the actual subscription cost"),
+    );
   }
   const prompt = buildAgentPrompt(config);
   const payload = JSON.parse(prompt.match(/```json\n([\s\S]*?)\n```/)[1]);

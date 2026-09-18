@@ -82,14 +82,14 @@ export function AgentTracking({ s }: { s: Snapshot }) {
   function download() {
     const blob = new Blob(
       [
-        `---\nname: crops-usage\ndescription: Report agent token usage and USD cost to the configured Crops client and project at the chosen trigger.\n---\n\n${prompt}`,
+        `---\nname: crops-token-skill\ndescription: Report agent tokens, plan capacity, and allocated subscription cost to the configured Crops client and project at the chosen trigger.\n---\n\n${prompt}`,
       ],
       { type: "text/markdown" },
     );
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "SKILL.md";
+    link.download = "crops-token-skill.md";
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -97,8 +97,9 @@ export function AgentTracking({ s }: { s: Snapshot }) {
     <section className="settings-section agent-tracking">
       <h2>Agent usage tracking</h2>
       <p className="muted">
-        Give your agent a ready-to-use prompt to report tokens and model cost to{" "}
-        {s.team.name}. Choose where the usage belongs and when to send it.
+        Give your agent a ready-to-use prompt to report tokens, plan capacity,
+        and subscription cost to {s.team.name}. Choose where the usage belongs
+        and when to send it.
       </p>
       <div className="form-grid">
         <Field label="Report usage after">
@@ -158,7 +159,7 @@ export function AgentTracking({ s }: { s: Snapshot }) {
             onChange={(e) => change({ billable: e.target.value === "true" })}
           >
             <option value="false">Track only · non-billable</option>
-            <option value="true">Add cost to billable total</option>
+            <option value="true">Bill the subscription slice</option>
           </Select>
         </Field>
       </div>
@@ -193,7 +194,7 @@ export function AgentTracking({ s }: { s: Snapshot }) {
           disabled={!prompt}
           onClick={download}
         >
-          <Download size={16} /> Download SKILL.md
+          <Download size={16} /> Download crops-token-skill.md
         </button>
         <span role="status">{copyStatus}</span>
       </div>
@@ -212,7 +213,8 @@ export function AgentTracking({ s }: { s: Snapshot }) {
       <p className="muted agent-prompt-note">
         Saved in this browser for this team. Copy again after changing a
         setting. Your agent follows the trigger; Crops does not install a
-        background hook. Reports add zero human hours and label estimated usage.
+        background hook. Reports add zero human hours. Tokens provide context;
+        cost is an allocated subscription slice, never an API token price.
       </p>
     </section>
   );
