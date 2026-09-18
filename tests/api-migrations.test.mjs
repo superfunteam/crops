@@ -148,3 +148,18 @@ test('access key migration stores only validated hashes, cascades with users, an
     assert.equal((await db.query('SELECT id FROM access_keys')).rows.length, 0);
   });
 });
+
+test('waitlist migration stores unique lowercase emails and matches the dev schema on replay', async () => {
+  await fixture(async db => {
+    await db.exec(bootstrap);
+    const waitlist = await migration('20260917010000_create_waitlist');
+    await db.exec(waitlist);
+    await db.exec(waitlist);
+    const { schema: devSchema } = await import('../db/schema.mjs');
+    await db.exec(devSchema);
+    await db.query("INSERT INTO waitlist(email) VALUES('ada@example.com')");
+    await assert.rejects(db.query("INSERT INTO waitlist(email) VALUES('ada@example.com')"));
+    await assert.rejects(db.query("INSERT INTO waitlist(email) VALUES('Ada@Example.com')"));
+    assert.equal((await db.query("SELECT relrowsecurity FROM pg_class WHERE relname='waitlist'")).rows[0].relrowsecurity, true);
+  });
+});

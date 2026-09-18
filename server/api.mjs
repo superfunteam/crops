@@ -181,6 +181,21 @@ export function createApi(options = {}) {
         await db.query('SELECT 1');
         return respond({ ok: true, storage: db.kind, registrationEnabled: env.CROPS_ALLOW_REGISTRATION !== 'false', serverTime: new Date().toISOString() });
       }
+      if (path === '/waitlist' && ['GET', 'POST'].includes(request.method)) {
+        const spots = Math.max(0, Math.floor(Number(env.CROPS_WAITLIST_SPOTS ?? 24)) || 0);
+        const count = async (q = db) => Number((await one(q, 'SELECT COUNT(*)::integer AS count FROM waitlist')).count);
+        if (request.method === 'GET') { const claimed = await count(); return respond({ spots, claimed, remaining: Math.max(0, spots - claimed) }); }
+        const email = string(body.email, 'Email', { min: 3, max: 254 }).toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'invalid_email', 'Enter a valid email address.');
+        await throttle(db, [[`waitlist-ip:${context.ip || 'unknown'}`, 10]], 3600, 'Too many signups from this network. Please try again later.');
+        const result = await db.transaction(async (tx) => {
+          const added = await one(tx, 'INSERT INTO waitlist(email) VALUES($1) ON CONFLICT(email) DO NOTHING RETURNING created_at', [email]);
+          const position = Number((await one(tx, 'SELECT COUNT(*)::integer AS count FROM waitlist WHERE created_at <= (SELECT created_at FROM waitlist WHERE email=$1)', [email])).count);
+          const claimed = await count(tx);
+          return { joined: Boolean(added), position, spots, claimed, remaining: Math.max(0, spots - claimed) };
+        });
+        return respond(result, result.joined ? 201 : 200);
+      }
       if (['/auth/login', '/auth/register'].includes(path) && request.method === 'POST') {
         const account = username(body.username);
         const secret = password(body.password);

@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS access_keys (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS access_keys_hash ON access_keys(key_hash);
 CREATE INDEX IF NOT EXISTS access_keys_user ON access_keys(user_id);
+-- Early-access signups from the login page (lowercase emails).
+CREATE TABLE IF NOT EXISTS waitlist (
+  email TEXT PRIMARY KEY CHECK (char_length(email) BETWEEN 3 AND 254 AND email = lower(email)),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS waitlist_created ON waitlist(created_at);
 
 -- Hosted PostgreSQL services may expose public-schema tables through a REST API.
 -- No direct client policies are granted. The Crops SQL table owner bypasses RLS
@@ -93,4 +99,5 @@ ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auth_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mutation_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE access_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE waitlist ENABLE ROW LEVEL SECURITY;
 `;

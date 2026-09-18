@@ -3,11 +3,15 @@ import { ArrowRight, Check } from "lucide-react";
 import { api } from "../api";
 import { Brand, Field } from "../components/UI";
 import { Pitch } from "../components/Pitch";
+import { Waitlist } from "../components/Waitlist";
 // On phones the pitch sits above the form, so focusing a field would scroll past it.
 const stacked = () =>
   typeof matchMedia === "function" && matchMedia("(max-width: 640px)").matches;
 export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
-  const [register, setRegister] = useState(false),
+  const [signingIn, setSigningIn] = useState(
+      () => typeof location !== "undefined" && location.hash === "#sign-in",
+    ),
+    [register, setRegister] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
@@ -55,102 +59,125 @@ export function Auth({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
             <AndroidIcon /> Android
           </a>
         </nav>
-        <div className="auth-form">
-          <div className="mobile-brand">
-            <Brand />
+        {!signingIn ? (
+          <div className="auth-form">
+            <Waitlist onSignIn={() => setSigningIn(true)} />
           </div>
-          <h2>{register ? "Plant your first seed." : "Welcome back."}</h2>
-          <p>
-            {register
-              ? "Create your account and give your team a home."
-              : "A fresh start for your next bit of good work."}
-          </p>
-          <form onSubmit={submit}>
-            <fieldset disabled={busy}>
-              {register && (
-                <>
-                  <Field label="Your name">
-                    <input
-                      autoFocus={!stacked()}
-                      name="name"
-                      autoComplete="name"
-                      required
-                      placeholder="Alex Morgan"
-                      maxLength={100}
-                    />
-                  </Field>
-                  <Field label="Team name">
-                    <input
-                      name="teamName"
-                      required
-                      placeholder="Your studio"
-                      maxLength={100}
-                    />
-                  </Field>
-                </>
-              )}
-              <Field label="Username">
-                <input
-                  name="username"
-                  autoComplete="username"
-                  autoFocus={!register && !stacked()}
-                  required
-                  minLength={3}
-                  maxLength={80}
-                  placeholder="Your username"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                />
-              </Field>
-              <Field label="Password">
-                <input
-                  name="password"
-                  type="password"
-                  autoComplete={register ? "new-password" : "current-password"}
-                  required
-                  minLength={register ? 8 : undefined}
-                  maxLength={128}
-                  placeholder={
-                    register ? "At least 8 characters" : "Your password"
-                  }
-                />
-              </Field>
-              {error && (
-                <p className="form-error" role="alert">
-                  {error}
-                </p>
-              )}
-              <button className="button primary auth-submit" type="submit">
-                {busy
-                  ? "One moment…"
-                  : register
-                    ? "Create your workspace"
-                    : "Sign in"}
-                <ArrowRight size={16} />
-              </button>
-            </fieldset>
-          </form>
-          {registrationEnabled ? (
+        ) : (
+          <div className="auth-form">
+            <div className="mobile-brand">
+              <Brand />
+            </div>
+            <h2>{register ? "Plant your first seed." : "Welcome back."}</h2>
+            <p>
+              {register
+                ? "Create your account and give your team a home."
+                : "A fresh start for your next bit of good work."}
+            </p>
+            <form onSubmit={submit}>
+              <fieldset disabled={busy}>
+                {register && (
+                  <>
+                    <Field label="Your name">
+                      <input
+                        autoFocus={!stacked()}
+                        name="name"
+                        autoComplete="name"
+                        required
+                        placeholder="Alex Morgan"
+                        maxLength={100}
+                      />
+                    </Field>
+                    <Field label="Team name">
+                      <input
+                        name="teamName"
+                        required
+                        placeholder="Your studio"
+                        maxLength={100}
+                      />
+                    </Field>
+                  </>
+                )}
+                <Field label="Username">
+                  <input
+                    name="username"
+                    autoComplete="username"
+                    autoFocus={!register && !stacked()}
+                    required
+                    minLength={3}
+                    maxLength={80}
+                    placeholder="Your username"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                </Field>
+                <Field label="Password">
+                  <input
+                    name="password"
+                    type="password"
+                    autoComplete={
+                      register ? "new-password" : "current-password"
+                    }
+                    required
+                    minLength={register ? 8 : undefined}
+                    maxLength={128}
+                    placeholder={
+                      register ? "At least 8 characters" : "Your password"
+                    }
+                  />
+                </Field>
+                {error && (
+                  <p className="form-error" role="alert">
+                    {error}
+                  </p>
+                )}
+                <button className="button primary auth-submit" type="submit">
+                  {busy
+                    ? "One moment…"
+                    : register
+                      ? "Create your workspace"
+                      : "Sign in"}
+                  <ArrowRight size={16} />
+                </button>
+              </fieldset>
+            </form>
+            {registrationEnabled ? (
+              <p className="auth-switch">
+                {register ? "Already have an account?" : "Starting a new team?"}{" "}
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setRegister(!register);
+                    setError("");
+                  }}
+                >
+                  {register ? "Sign in" : "Create a workspace"}
+                </button>
+              </p>
+            ) : (
+              <p className="auth-switch">
+                Need an account? Ask your team admin.
+              </p>
+            )}
             <p className="auth-switch">
-              {register ? "Already have an account?" : "Starting a new team?"}{" "}
               <button
                 type="button"
                 className="text-button"
                 onClick={() => {
-                  setRegister(!register);
+                  setSigningIn(false);
+                  setRegister(false);
                   setError("");
                 }}
               >
-                {register ? "Sign in" : "Create a workspace"}
+                ← Back to early access
               </button>
             </p>
-          ) : (
-            <p className="auth-switch">Need an account? Ask your team admin.</p>
-          )}
-          <div className="auth-note">
-            <Check size={16} /> Just time tracking. Beautifully simple.
+            <div className="auth-note">
+              <Check size={16} /> Just time tracking. Beautifully simple.
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );
