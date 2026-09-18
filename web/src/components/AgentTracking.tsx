@@ -8,11 +8,21 @@ import {
   type AgentTrigger,
 } from "../agentPrompt";
 
+const emptySubscription = {
+  plan: "",
+  fee: "",
+  start: "",
+  end: "",
+  hours: "",
+  scope: "individual" as "individual" | "shared",
+};
+type SubscriptionDraft = typeof emptySubscription;
 type Preferences = {
   clientId: string;
   projectId: string;
   trigger: AgentTrigger;
   billable: boolean;
+  subscription: SubscriptionDraft;
 };
 export function AgentTracking({ s }: { s: Snapshot }) {
   const storageKey = `crops.agent-prompt.${s.user.id}.${s.team.id}`;
@@ -26,6 +36,14 @@ export function AgentTracking({ s }: { s: Snapshot }) {
           ? saved.trigger
           : "session",
         billable: saved.billable === true,
+        subscription: Object.fromEntries(
+          Object.entries(emptySubscription).map(([key, fallback]) => [
+            key,
+            typeof saved.subscription?.[key] === "string"
+              ? saved.subscription[key]
+              : fallback,
+          ]),
+        ) as SubscriptionDraft,
       };
     } catch {
       return {
@@ -33,6 +51,7 @@ export function AgentTracking({ s }: { s: Snapshot }) {
         projectId: "",
         trigger: "session",
         billable: false,
+        subscription: emptySubscription,
       };
     }
   });
@@ -53,20 +72,52 @@ export function AgentTracking({ s }: { s: Snapshot }) {
       )
     : [];
   const project = projects.find((p) => p.id === preferences.projectId);
-  const prompt = project
-    ? buildAgentPrompt({
-        origin: location.origin,
-        teamId: s.team.id,
-        teamName: s.team.name,
-        clientId: client?.id ?? null,
-        clientName: client?.name ?? "No client",
-        projectId: project.id,
-        projectName: project.name,
-        trigger: preferences.trigger,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        billable: preferences.billable,
-      })
-    : "";
+  const draft = preferences.subscription;
+  const hasSubscription = Boolean(
+    draft.plan || draft.fee || draft.start || draft.end || draft.hours,
+  );
+  const validDate = (value: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString().slice(0, 10) === value;
+  const validSubscription = Boolean(
+    draft.plan.trim() &&
+    draft.fee.trim() &&
+    Number.isFinite(Number(draft.fee)) &&
+    Number(draft.fee) >= 0 &&
+    Number(draft.fee) <= 1000000 &&
+    validDate(draft.start) &&
+    validDate(draft.end) &&
+    draft.end > draft.start &&
+    Number.isFinite(Number(draft.hours)) &&
+    Number(draft.hours) > 0 &&
+    ["individual", "shared"].includes(draft.scope),
+  );
+  const prompt =
+    project && (!hasSubscription || validSubscription)
+      ? buildAgentPrompt({
+          origin: location.origin,
+          teamId: s.team.id,
+          teamName: s.team.name,
+          clientId: client?.id ?? null,
+          clientName: client?.name ?? "No client",
+          projectId: project.id,
+          projectName: project.name,
+          trigger: preferences.trigger,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          billable: preferences.billable,
+          subscription: validSubscription
+            ? {
+                plan: draft.plan.trim(),
+                feeUsd: Number(draft.fee),
+                periodStart: draft.start,
+                periodEnd: draft.end,
+                capacityHours: Number(draft.hours),
+                scope: draft.scope,
+              }
+            : undefined,
+        })
+      : "";
   function change(update: Partial<Preferences>) {
     setPreferences((p) => ({ ...p, ...update }));
     setCopyStatus("");
@@ -163,6 +214,101 @@ export function AgentTracking({ s }: { s: Snapshot }) {
           </Select>
         </Field>
       </div>
+      <h3>Subscription allocation</h3>
+      <p className="muted">
+        Include these details so your agent does not have to ask. Use the actual
+        fee and a capacity budget for the same billing period. The budget is
+        your allocation choice, including on unlimited plans.
+      </p>
+      <div className="form-grid">
+        <Field label="Provider and plan">
+          <input
+            name="subscriptionPlan"
+            maxLength={150}
+            placeholder="Your provider and subscription plan"
+            value={draft.plan}
+            onChange={(e) =>
+              change({ subscription: { ...draft, plan: e.target.value } })
+            }
+          />
+        </Field>
+        <Field label="Subscription fee (USD)">
+          <input
+            name="subscriptionFee"
+            type="number"
+            min="0"
+            max="1000000"
+            step="0.01"
+            value={draft.fee}
+            onChange={(e) =>
+              change({ subscription: { ...draft, fee: e.target.value } })
+            }
+          />
+        </Field>
+        <Field label="Billing period starts">
+          <input
+            name="subscriptionStart"
+            type="date"
+            value={draft.start}
+            onChange={(e) =>
+              change({ subscription: { ...draft, start: e.target.value } })
+            }
+          />
+        </Field>
+        <Field label="Next billing date (exclusive)">
+          <input
+            name="subscriptionEnd"
+            type="date"
+            value={draft.end}
+            onChange={(e) =>
+              change({ subscription: { ...draft, end: e.target.value } })
+            }
+          />
+        </Field>
+        <Field
+          label="Capacity budget (active agent hours)"
+          hint="For the entire billing period, across all clients. Cost = fee × this work’s active hours ÷ this budget."
+        >
+          <input
+            name="subscriptionHours"
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={draft.hours}
+            onChange={(e) =>
+              change({ subscription: { ...draft, hours: e.target.value } })
+            }
+          />
+        </Field>
+        <Field label="Subscription scope">
+          <Select
+            name="subscriptionScope"
+            value={draft.scope}
+            onChange={(e) =>
+              change({
+                subscription: {
+                  ...draft,
+                  scope: e.target.value as SubscriptionDraft["scope"],
+                },
+              })
+            }
+          >
+            <option value="individual">My individual seat</option>
+            <option value="shared">Shared subscription pool</option>
+          </Select>
+        </Field>
+      </div>
+      <p className="muted">
+        Copying includes this allocation basis in your instructions. Leave all
+        subscription fields blank to let the agent reuse details you already
+        gave it.
+      </p>
+      {hasSubscription && !validSubscription && (
+        <p role="status" className="form-error">
+          Complete the plan, fee, valid billing dates, and a positive capacity
+          budget to copy the prompt.
+        </p>
+      )}
       {validClient && !projects.length && (
         <p role="status" className="muted">
           This client has no active projects. Create one in Projects, then
