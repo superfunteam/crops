@@ -3,7 +3,7 @@ import { Trash2 } from "lucide-react";
 import type { Client, Entry, Member, Project, Snapshot } from "../types";
 import { TeamEditor } from "./TeamEditor";
 import type { Crops } from "../useCrops";
-import { clientName, parseDuration, time, today } from "../lib";
+import { clientName, isAgentOnly, parseDuration, time, today } from "../lib";
 import { Field, Modal, Select } from "./UI";
 export type Editor =
   | { kind: "entry"; entry?: Entry; date?: string }
@@ -35,7 +35,9 @@ export function Editors({
   const title =
     editor.kind === "entry"
       ? entry
-        ? "Edit time entry"
+        ? isAgentOnly(entry)
+          ? "Edit agent usage"
+          : "Edit time entry"
         : "Add time"
       : editor.kind === "project"
         ? project
@@ -63,7 +65,17 @@ export function Editors({
           task: d.task,
           notes: d.notes,
           date: d.date,
-          durationSeconds: parseDuration(String(d.duration)),
+          durationSeconds:
+            entry && isAgentOnly(entry) ? 0 : parseDuration(String(d.duration)),
+          ...(entry?.agent
+            ? {
+                agent: {
+                  tokens: Number(d.agentTokens),
+                  cost: Number(d.agentCost),
+                  model: String(d.agentModel || "") || null,
+                },
+              }
+            : {}),
           billable: form.has("billable"),
         };
         if (entry) {
@@ -243,25 +255,62 @@ export function Editors({
                     required
                   />
                 </Field>
-                <Field label="Duration" hint="Hours (1.5) or time (1:30).">
-                  <input
-                    name="duration"
-                    placeholder="1:30"
-                    defaultValue={
-                      entry ? time(entry.durationSeconds, true) : undefined
-                    }
-                    required
-                    inputMode="decimal"
-                  />
-                </Field>
+                {!(entry && isAgentOnly(entry)) && (
+                  <Field label="Duration" hint="Hours (1.5) or time (1:30).">
+                    <input
+                      name="duration"
+                      placeholder="1:30"
+                      defaultValue={
+                        entry ? time(entry.durationSeconds, true) : undefined
+                      }
+                      required
+                      inputMode="decimal"
+                    />
+                  </Field>
+                )}
               </div>
+              {entry?.agent && (
+                <div className="form-grid">
+                  <Field label="Tokens">
+                    <input
+                      name="agentTokens"
+                      type="number"
+                      required
+                      min="0"
+                      max="1000000000000"
+                      step="1"
+                      defaultValue={entry.agent.tokens}
+                    />
+                  </Field>
+                  <Field label="Reported cost (USD)">
+                    <input
+                      name="agentCost"
+                      type="number"
+                      required
+                      min="0"
+                      max="1000000"
+                      step="0.01"
+                      defaultValue={entry.agent.cost}
+                    />
+                  </Field>
+                  <Field label="Model / vendor">
+                    <input
+                      name="agentModel"
+                      maxLength={100}
+                      defaultValue={entry.agent.model || ""}
+                    />
+                  </Field>
+                </div>
+              )}
               <label className="check-label">
                 <input
                   type="checkbox"
                   name="billable"
                   defaultChecked={entry?.billable ?? true}
                 />
-                Billable time
+                {entry && isAgentOnly(entry)
+                  ? "Billable agent cost"
+                  : "Billable time"}
               </label>
             </>
           )}

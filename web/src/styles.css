@@ -3407,3 +3407,13 @@ small,
     font-size: 16px;
   }
 }
+
+.agent-quantity { display: flex; flex-direction: column; gap: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.agent-quantity > span { font-size: 11px; font-weight: 600; color: var(--muted); }
+.agent-quantity strong { font-size: 17px; }
+.agent-quantity small { font-size: 13px; }
+.agent-quantity small span { color: var(--muted); font-size: 11px; }
+.agent-entry-details { margin-top: 8px; font-size: 12px; font-weight: 400; }
+.agent-entry-details summary { cursor: pointer; color: var(--muted); }
+.agent-entry-details > div { margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 65ch; max-height: 350px; overflow-y: auto; line-height: 1.6; }
+.agent-report-summary { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 18px 0; border-bottom: 1px solid var(--border); font-size: 13px; }

@@ -227,3 +227,29 @@ test("agent work titles display legacy task summaries without changing notes", a
   );
   assert.equal(agentWorkTitle("Agent usage"), "Agent work");
 });
+
+test("token-only entries are distinct from human time and combined usage", async () => {
+  const { isAgentOnly, entryAmount } = await import("../web/src/lib.ts");
+  const entry = {
+    agent: {
+      tokens: 76203292,
+      cost: 1.66,
+      model: "claude-opus-5-5 (Anthropic)",
+    },
+    durationSeconds: 0,
+    startedAt: null,
+    billable: true,
+  };
+  assert.equal(isAgentOnly(entry), true);
+  assert.equal(entryAmount(entry, 100, Date.now()), 1.66);
+  assert.equal(isAgentOnly({ ...entry, agent: null }), false);
+  assert.equal(isAgentOnly({ ...entry, durationSeconds: 3600 }), false);
+  assert.equal(
+    isAgentOnly({ ...entry, startedAt: new Date().toISOString() }),
+    false,
+  );
+  assert.equal(
+    entryAmount({ ...entry, durationSeconds: 3600 }, 100, Date.now()),
+    101.66,
+  );
+});

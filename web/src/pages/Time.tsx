@@ -17,6 +17,7 @@ import {
   addDays,
   agentLabel,
   agentWorkTitle,
+  isAgentOnly,
   clientName,
   duration,
   exportCSV,
@@ -27,6 +28,7 @@ import {
   weekDates,
 } from "../lib";
 import { Empty, PageHeading, Select, Status } from "../components/UI";
+import { AgentUsage, AgentDetails } from "../components/AgentUsage";
 export function TimePage({
   s,
   crops,
@@ -344,7 +346,7 @@ export function TimePage({
                   <h3>
                     {p?.name || "Project"}{" "}
                     {!e.agent && <span className="task-tag">{e.task}</span>}
-                    {e.agent && (
+                    {e.agent && !isAgentOnly(e) && (
                       <span
                         className="task-tag"
                         title={`Agent usage${e.agent.model ? ` · ${e.agent.model}` : ""}`}
@@ -358,6 +360,7 @@ export function TimePage({
                       ? agentWorkTitle(e.task)
                       : e.notes || "No notes added."}
                   </p>
+                  {e.agent && <AgentDetails notes={e.notes} />}
                 </div>
                 <div className="entry-meta">
                   {e.status !== "unbilled" ? (
@@ -371,27 +374,33 @@ export function TimePage({
                       Running
                     </span>
                   )}
-                  <strong className="entry-time">
-                    {time(duration(e, crops.now), isActive)}
-                  </strong>
+                  {isAgentOnly(e) ? (
+                    <AgentUsage usage={e.agent!} />
+                  ) : (
+                    <strong className="entry-time">
+                      {time(duration(e, crops.now), isActive)}
+                    </strong>
+                  )}
                 </div>
                 <div className="entry-actions">
-                  <button
-                    type="button"
-                    className={`icon-button ${isActive ? "stop-entry" : ""}`}
-                    title={isActive ? "Stop timer" : "Resume timer"}
-                    aria-label={`${isActive ? "Stop" : "Resume"} ${p?.name}`}
-                    disabled={
-                      crops.busy || e.status !== "unbilled" || p?.archived
-                    }
-                    onClick={() => void (isActive ? stop(e) : resume(e))}
-                  >
-                    {isActive ? (
-                      <Square size={12} fill="currentColor" />
-                    ) : (
-                      <Play size={15} />
-                    )}
-                  </button>
+                  {!isAgentOnly(e) && (
+                    <button
+                      type="button"
+                      className={`icon-button ${isActive ? "stop-entry" : ""}`}
+                      title={isActive ? "Stop timer" : "Resume timer"}
+                      aria-label={`${isActive ? "Stop" : "Resume"} ${p?.name}`}
+                      disabled={
+                        crops.busy || e.status !== "unbilled" || p?.archived
+                      }
+                      onClick={() => void (isActive ? stop(e) : resume(e))}
+                    >
+                      {isActive ? (
+                        <Square size={12} fill="currentColor" />
+                      ) : (
+                        <Play size={15} />
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="icon-button"

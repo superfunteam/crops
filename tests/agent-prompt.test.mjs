@@ -50,6 +50,10 @@ test("generated agent prompt posts usage to its chosen client without touching t
     assert.ok(prompt.includes(agentTriggers[trigger].instruction));
     assert.ok(prompt.includes(JSON.stringify(config.clientName)));
     assert.ok(prompt.includes("24 hours"));
+    assert.ok(
+      prompt.includes("The webhook does not extract numbers from notes"),
+    );
+    assert.ok(prompt.includes("entry.agent.tokens and entry.agent.cost equal"));
     assert.ok(prompt.includes("ALLOCATED SUBSCRIPTION COST"));
     assert.ok(
       prompt.includes(

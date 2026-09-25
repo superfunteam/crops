@@ -56,6 +56,11 @@ export const tokens = (n: number) =>
   `${new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(n)} tokens`;
 export const agentLabel = (e: Pick<Entry, "agent">) =>
   e.agent ? `${tokens(e.agent.tokens)} · ${money(e.agent.cost)}` : "";
+// A stopped zero-duration record with structured usage is a token-only line item.
+// Existing records need no rewrite, and combined time + usage records retain both.
+export const isAgentOnly = (
+  e: Pick<Entry, "agent" | "durationSeconds" | "startedAt">,
+) => Boolean(e.agent) && e.durationSeconds === 0 && !e.startedAt;
 // Older agents prefixed the task title; keep stored history intact.
 export const agentWorkTitle = (task: string) =>
   task.replace(/^agent\s+usage\s*(?::\s*|$)/i, "").trim() || "Agent work";
@@ -101,6 +106,7 @@ export function exportCSV(s: Snapshot, entries: Entry[], now: number) {
       .join(",");
   const rows = [
     cells([
+      "Entry type",
       "Date",
       "Person",
       "Client",
@@ -117,13 +123,18 @@ export function exportCSV(s: Snapshot, entries: Entry[], now: number) {
     ...entries.map((e) => {
       const p = projectFor(s, e.projectId);
       return cells([
+        isAgentOnly(e)
+          ? "Agent usage"
+          : e.agent
+            ? "Time + agent usage"
+            : "Time",
         e.date,
         personName(s, e.userId),
         clientName(s, p),
         p?.name,
         e.task,
         e.notes,
-        decimal(duration(e, now)),
+        isAgentOnly(e) ? "" : decimal(duration(e, now)),
         e.billable ? "Yes" : "No",
         e.status,
         e.agent?.tokens ?? "",

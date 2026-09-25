@@ -1,13 +1,12 @@
 import { useState } from "react";
-import {
-  ArrowDownToLine,
-  Check,
-} from "lucide-react";
+import { ArrowDownToLine, Check } from "lucide-react";
 import type { Snapshot, Entry, BillingStatus } from "../types";
 import type { Crops } from "../useCrops";
 import type { Editor } from "../components/Editors";
 import {
   duration,
+  isAgentOnly,
+  agentWorkTitle,
   entryAmount,
   exportCSV,
   money,
@@ -18,6 +17,7 @@ import {
   tokens,
 } from "../lib";
 import { Empty, PageHeading, Select, Status } from "../components/UI";
+import { AgentUsage, AgentDetails } from "../components/AgentUsage";
 export function ReportsPage({
   s,
   crops,
@@ -166,7 +166,11 @@ export function ReportsPage({
                 {m.name}
               </option>
             ))}
-          {(s.formerMembers ?? []).map((m) => <option key={m.id} value={m.id}>{m.name} · Former member</option>)}
+          {(s.formerMembers ?? []).map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} · Former member
+            </option>
+          ))}
         </Select>
         <Select
           name="project"
@@ -223,12 +227,15 @@ export function ReportsPage({
           ) : (
             <>
               <div>
-                <span>Total tracked</span>
+                <span>Human time</span>
                 <strong>
                   {time(total)}
                   <em> h</em>
                 </strong>
-                <small>{entries.length} time entries</small>
+                <small>
+                  {entries.filter((e) => !isAgentOnly(e)).length} time entries ·{" "}
+                  {entries.filter(isAgentOnly).length} agent entries
+                </small>
               </div>
               <div>
                 <span>Billable time</span>
@@ -254,7 +261,22 @@ export function ReportsPage({
           )}
         </div>
       </div>
-      {!billing && entries.length > 0 && (
+      {entries.some((e) => e.agent) && (
+        <div className="agent-report-summary" role="status">
+          <strong>Agent usage</strong>
+          <span>
+            {tokens(entries.reduce((n, e) => n + (e.agent?.tokens || 0), 0))}
+          </span>
+          <span>
+            {money(entries.reduce((n, e) => n + (e.agent?.cost || 0), 0))}{" "}
+            reported cost
+            {billing
+              ? " · billable entries"
+              : " · includes non-billable entries"}
+          </span>
+        </div>
+      )}
+      {!billing && total > 0 && (
         <section className="project-breakdown">
           <div className="section-toolbar">
             <h2>Time by project</h2>
@@ -307,7 +329,7 @@ export function ReportsPage({
       )}
       <div className="section-toolbar">
         <h2>
-          {billing ? "Billable entries" : "Time entries"}{" "}
+          {billing ? "Billable entries" : "Time & agent entries"}{" "}
           <span className="count">{entries.length}</span>
         </h2>
         <Select
@@ -383,8 +405,8 @@ export function ReportsPage({
                   </th>
                 )}
                 <th>Date / teammate</th>
-                <th>Project / notes</th>
-                <th>Hours</th>
+                <th>Project / work</th>
+                <th>Time / agent usage</th>
                 {billing && <th>Amount</th>}
                 <th>Status</th>
               </tr>
@@ -421,18 +443,28 @@ export function ReportsPage({
                       >
                         {p?.name}
                       </button>
-                      <div className="muted small truncate" title={e.notes}>
-                        {e.task}
-                        {e.agent &&
-                          ` · ${tokens(e.agent.tokens)} · ${money(e.agent.cost)} agent`}
-                        {e.notes && ` · ${e.notes}`}
+                      <div
+                        className="muted small truncate"
+                        title={e.agent ? agentWorkTitle(e.task) : e.notes}
+                      >
+                        {e.agent ? agentWorkTitle(e.task) : e.task}
+                        {!e.agent && e.notes && ` · ${e.notes}`}
                       </div>
+                      {e.agent && <AgentDetails notes={e.notes} />}
                     </td>
                     <td className="numeric">
-                      {time(duration(e, crops.now))}
-                      {e.startedAt && (
-                        <span className="running-indicator" title="Running" />
+                      {!isAgentOnly(e) && (
+                        <div>
+                          {time(duration(e, crops.now))}
+                          {e.startedAt && (
+                            <span
+                              className="running-indicator"
+                              title="Running"
+                            />
+                          )}
+                        </div>
                       )}
+                      {e.agent && <AgentUsage usage={e.agent} />}
                     </td>
                     {billing && (
                       <td className="numeric">
@@ -450,8 +482,8 @@ export function ReportsPage({
         </div>
       ) : (
         <Empty title="Nothing in this patch yet.">
-          Time entries will appear here. Try a different date range or clear a
-          filter.
+          Time and agent usage entries will appear here. Try a different date
+          range or clear a filter.
         </Empty>
       )}
       {billing && (
