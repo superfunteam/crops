@@ -21,6 +21,8 @@ Open the app and sign in or create a workspace. Fresh installs connect to **`htt
 
 - The menu bar always shows a rounded dark-green badge: **CROPS** with a leaf while idle, a play indicator and live `h:mm:ss` while running, and a yellow warning when sync needs attention. Hover for the current project and task. Closing the companion window keeps the app running; **Quit Crops** exits explicitly.
 - The compact home starts with the week calendar and your daily entries. Click **+ Start timer** (or **+ New timer** while running) to choose a project. The form opens only after that action; **Back** or Escape returns to the timesheet. A successful start returns to the active timer automatically.
+- Forms use taller, rounded controls: a native project menu, a Timer/Manual selector, multiline Notes, and a Billable switch. Start/Save stays visible below the scrolling new-entry form. The menu-bar panel expands while a form is open and returns to its compact size afterwards.
+- Views fade and settle into place when opening forms, switching entry types, opening Settings, or starting/stopping a timer. Routine syncs and clock ticks do not replay the transitions. macOS **Reduce Motion** disables them.
 - Stop from the green timer panel. Stop sends the displayed entry version, so an outdated window cannot stop a newer session resumed elsewhere. Resume a stopped unbilled entry using its play button.
 - Choose **Start timer → Manual time** to add time. Enter `1:30` or `1.5` for 90 minutes. Saving returns to that day's entries.
 - Edit an entry with its pencil button, a double-click, or the right-click menu. The edit form matches New entry: project, task, notes, date, duration (`1:30`, `1.5`, or `1:30:15`, up to one week), and billable. Return saves and Escape goes back; unchanged forms simply close. A running timer can change its project, task, notes, and billable flag; stop it first to change its date or duration.
@@ -31,7 +33,7 @@ Open the app and sign in or create a workspace. Fresh installs connect to **`htt
 - Navigate days or weeks above the active timer to review your personal time. Management, team membership, project setup, and invoiced/paid status live in **Open web**.
 - Use the team menu to switch workspaces. Your one active timer remains visible across teams.
 - Settings includes account information, sync status, sign out, and Quit. The timer keeps running on the server when the window or app closes.
-- `⌘N` opens a new entry from the timesheet; `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management. In the edit form, Return saves, Escape goes back, and `⌘⌫` deletes after confirmation. These shortcuts apply while Crops is active.
+- `⌘N` opens a new entry from the timesheet; `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management. Return submits forms except while editing multiline Notes, where it inserts a line. Escape goes back, and `⌘⌫` deletes after confirmation in the edit form. These shortcuts apply while Crops is active.
 
 ## Sync and reliability
 

@@ -1,6 +1,7 @@
 package com.crops.time;
 
 import android.Manifest;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
@@ -19,10 +20,12 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -30,6 +33,7 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.view.animation.PathInterpolator;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.time.LocalDate;
@@ -43,6 +47,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private static final int BG = 0xFFF6F5EF, GREEN = 0xFF285A43, INK = 0xFF213A30, MUTED = 0xFF727B71, LINE = 0xFFE0E4DA, LIME = 0xFFDCEEA5;
     private Repository repo;
     private LinearLayout root, page, body, entries;
+    private ScrollView pageScroll;
     private TextView syncStatus, timerClock, totalClock, loginError, timerError;
     private EditText serverInput, usernameInput, passwordInput, nameInput, teamInput, taskInput, notesInput;
     private Button submit, startStop, timerSubmit;
@@ -50,7 +55,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private CheckBox billableInput;
     private final List<JSONObject> projectOptions = new ArrayList<>();
     private final List<JSONObject> timerProjectOptions = new ArrayList<>();
-    private String projectId = "", draftTask = "", draftNotes = "", screenSignature = "";
+    private String projectId = "", draftTask = "", draftNotes = "", screenSignature = "", displayedTimer = "";
     private boolean billable = true, register, resumed, loginView, composingTimer;
     private int tab;
     /** The currently open entry dialog, if any; package-visible for the instrumentation suite. */
@@ -89,13 +94,15 @@ public final class MainActivity extends Activity implements Repository.Listener 
     @Override public void changed() {
         if (timerDialog != null && (repo.running() != null || !repo.signedIn())) timerDialog.dismiss();
         if (loginView != !repo.signedIn() || (!loginView && !signature().equals(screenSignature))) {
-            captureDraft(); render();
+            boolean timerChanged = !loginView && !timerIdentity().equals(displayedTimer);
+            captureDraft(); render(timerChanged);
         }
         if (loginError != null && loginView) loginError.setText(repo.error);
         if (submit != null && loginView) { submit.setEnabled(!repo.busy); submit.setText(repo.busy ? "Connecting…" : register ? "Create your workspace" : "Sign in"); }
         if (startStop != null && !loginView) startStop.setEnabled(!repo.busy && (repo.running() != null || !projectOptions.isEmpty()));
-        if (timerSubmit != null) { timerSubmit.setEnabled(!repo.busy && !projectOptions.isEmpty()); timerSubmit.setText(repo.busy ? "Starting…" : "Start timer"); }
-        if (timerDialog != null) { timerDialog.setCancelable(!repo.busy); timerDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!repo.busy); }
+        boolean timerClosing = timerDialog instanceof CropsDialog && ((CropsDialog) timerDialog).closing;
+        if (timerSubmit != null) { timerSubmit.setEnabled(!timerClosing && !repo.busy && !projectOptions.isEmpty()); timerSubmit.setText(repo.busy ? "Starting…" : "Start timer"); }
+        if (timerDialog != null) { timerDialog.setCancelable(!timerClosing && !repo.busy); timerDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!timerClosing && !repo.busy); }
         if (timerError != null) timerError.setText(repo.error);
         updateClocks(); ensureService();
     }
@@ -103,6 +110,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         if (repo.state == null) return "loading";
         return repo.array("teams").toString() + repo.array("projects") + repo.array("entries") + repo.running() + repo.teamId();
     }
+    private String timerIdentity() { JSONObject running = repo.running(); return running == null ? "idle" : running.optString("id"); }
     private void captureDraft() {
         if (taskInput != null) draftTask = taskInput.getText().toString();
         if (notesInput != null) draftNotes = notesInput.getText().toString();
@@ -110,10 +118,14 @@ public final class MainActivity extends Activity implements Repository.Listener 
         if (projectSpinner != null && projectSpinner.getSelectedItemPosition() >= 0 && projectSpinner.getSelectedItemPosition() < timerProjectOptions.size())
             projectId = timerProjectOptions.get(projectSpinner.getSelectedItemPosition()).optString("id");
     }
-    private void render() {
+    private void render() { render(false); }
+    private void render(boolean animate) {
+        ScrollView previous = pageScroll; pageScroll = null;
+        boolean crossfade = animate && previous != null && resumed && motionEnabled();
+        if (previous != null) { previous.animate().cancel(); previous.setAlpha(1f); previous.setTranslationY(0f); }
         if (timerDialog == null) { taskInput = null; notesInput = null; projectSpinner = null; billableInput = null; }
         timerClock = null; totalClock = null; startStop = null; loginError = null; submit = null; entries = null;
-        loginView = !repo.signedIn(); screenSignature = signature();
+        loginView = !repo.signedIn(); screenSignature = signature(); displayedTimer = timerIdentity();
         root = column(); root.setBackgroundColor(BG); root.setPadding(dp(22), dp(20), dp(22), dp(12));
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) { android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime()); root.setPadding(dp(22) + bars.left, dp(12) + bars.top, dp(22) + bars.right, dp(10) + bars.bottom); }
@@ -124,11 +136,19 @@ public final class MainActivity extends Activity implements Repository.Listener 
         if (loginView) { login(); return; }
         header();
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        pageScroll = scroll;
+        FrameLayout scene = new FrameLayout(this); root.addView(scene, new LinearLayout.LayoutParams(-1, 0, 1));
+        if (crossfade) { ((ViewGroup) previous.getParent()).removeView(previous); disableTree(previous); previous.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS); scene.addView(previous, new FrameLayout.LayoutParams(-1, -1)); }
+        scene.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         page = column(); page.setPadding(0, dp(14), 0, dp(12)); scroll.addView(page);
         if (repo.state == null) { page.addView(text("Getting your workspace…", 25, INK, true)); page.addView(text("Your time will be here in a moment.", 15, MUTED, false)); }
         else if (tab == 0) timerPage(); else if (tab == 1) timesheetPage(); else settingsPage();
         navigation(); updateClocks();
+        if (crossfade) {
+            scroll.setAlpha(0f); scroll.setTranslationY(dp(10));
+            scroll.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(ease()).start();
+            previous.animate().alpha(0f).translationY(-dp(6)).setDuration(180).setInterpolator(ease()).withEndAction(() -> scene.removeView(previous)).start();
+        }
         if (composingTimer && repo.state != null && repo.running() == null && timerDialog == null) newTimerDialog();
     }
     private void header() {
@@ -207,8 +227,8 @@ public final class MainActivity extends Activity implements Repository.Listener 
         Button current = button(date.equals(LocalDate.now()) ? "Today, " + date.format(DateTimeFormatter.ofPattern("MMM d")) : date.format(DateTimeFormatter.ofPattern("EEE, MMM d")), BG, INK);
         current.setContentDescription("Choose date, " + date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d"))); dates.addView(current, new LinearLayout.LayoutParams(0, dp(48), 1));
         Button next = button("›", Color.WHITE, GREEN); next.setContentDescription("Next day"); next.setEnabled(date.isBefore(LocalDate.now())); dates.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        previous.setOnClickListener(v -> { date = date.minusDays(1); render(); }); next.setOnClickListener(v -> { date = date.plusDays(1); render(); });
-        current.setOnClickListener(v -> new DatePickerDialog(this, (picker, year, month, day) -> { date = LocalDate.of(year, month+1, day); render(); }, date.getYear(), date.getMonthValue()-1, date.getDayOfMonth()).show());
+        previous.setOnClickListener(v -> { date = date.minusDays(1); render(true); }); next.setOnClickListener(v -> { date = date.plusDays(1); render(true); });
+        current.setOnClickListener(v -> new DatePickerDialog(this, (picker, year, month, day) -> { date = LocalDate.of(year, month+1, day); render(true); }, date.getYear(), date.getMonthValue()-1, date.getDayOfMonth()).show());
         LinearLayout total = row(); total.setGravity(Gravity.CENTER_VERTICAL); margin(page, total, 12); total.addView(text("Total time", 16, MUTED, false), new LinearLayout.LayoutParams(0, -2, 1)); totalClock = text("0h 00m", 20, GREEN, true); total.addView(totalClock);
         entries = column(); margin(page, entries, 8); fillEntries(date, 1000);
         Button add = button("+  Add time", GREEN, Color.WHITE); add.setOnClickListener(v -> manualDialog()); margin(page, add, 10);
@@ -228,7 +248,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         Button notifications = button("Notification settings", BG, GREEN); notifications.setOnClickListener(v -> startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()))); margin(page, notifications, 12);
         Button syncNow = button("Sync now", BG, GREEN); syncNow.setOnClickListener(v -> repo.refresh()); margin(page, syncNow, 4);
         Button signOut = button("Sign out", Color.WHITE, 0xFFA23831); signOut.setOnClickListener(v -> { if (repo.running() != null) Toast.makeText(this, "Your timer continues in your workspace.", Toast.LENGTH_LONG).show(); stopService(new Intent(this, TimerService.class)); repo.logout(); }); margin(page, signOut, 22);
-        margin(page, text("CROPS  1.2.0\nNative, simple, and made for your team.", 12, MUTED, false), 24);
+        margin(page, text("CROPS  1.3.0\nNative, simple, and made for your team.", 12, MUTED, false), 24);
     }
     private void fillEntries(LocalDate target, int limit) {
         JSONArray all = repo.array("entries"); int count = 0;
@@ -300,7 +320,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private void navigation() {
         LinearLayout nav = row(); nav.setPadding(dp(5), dp(5), dp(5), dp(5)); nav.setBackground(shape(0xFFE9ECE3, 24, 0)); root.addView(nav);
         String[] labels = { "◷  Timer", "▤  Timesheet", "⚙  Settings" };
-        for (int i = 0; i < labels.length; i++) { int selected = i; Button button = button(labels[i], tab == i ? Color.WHITE : 0xFFE9ECE3, tab == i ? GREEN : MUTED); button.setTextSize(12); nav.addView(button, new LinearLayout.LayoutParams(0, dp(48), 1)); button.setOnClickListener(v -> { captureDraft(); tab = selected; render(); }); }
+        for (int i = 0; i < labels.length; i++) { int selected = i; Button button = button(labels[i], tab == i ? Color.WHITE : 0xFFE9ECE3, tab == i ? GREEN : MUTED); button.setTextSize(12); nav.addView(button, new LinearLayout.LayoutParams(0, dp(48), 1)); button.setOnClickListener(v -> { if (tab == selected) return; captureDraft(); tab = selected; render(true); }); }
     }
     private void populateProjectOptions() {
         projectOptions.clear(); JSONArray projects = repo.array("projects");
@@ -318,7 +338,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         billableInput = check("Billable time", billable); billableInput.setMinHeight(dp(48)); margin(content, billableInput, 4);
         timerError = text(repo.error, 13, 0xFFA23831, false); timerError.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); margin(content, timerError, 4);
         ScrollView scroll = new ScrollView(this); scroll.addView(content);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("What are you working on?").setView(scroll).setNegativeButton("Cancel", null).setPositiveButton("Start timer", null).create();
+        AlertDialog dialog = new CropsDialog("What are you working on?", scroll, "Start timer", "Cancel", null);
         timerDialog = dialog;
         dialog.setOnDismissListener(d -> {
             captureDraft(); composingTimer = false;
@@ -349,7 +369,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         EditText notes = field(content, "Notes", "Optional context", "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         CheckBox billable = check("Billable time", true); margin(content, billable, 8);
         ScrollView scroll = new ScrollView(this); scroll.addView(content);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Add time").setView(scroll).setNegativeButton("Cancel", null).setPositiveButton("Save time", null).create();
+        AlertDialog dialog = new CropsDialog("Add time", scroll, "Save time", "Cancel", null);
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             if (repo.busy) { Toast.makeText(this, "Finishing your previous change. Try again in a moment.", Toast.LENGTH_SHORT).show(); return; }
             if (!repo.signedIn()) { Toast.makeText(this, "Sign in again before saving time.", Toast.LENGTH_SHORT).show(); return; }
@@ -412,13 +432,8 @@ public final class MainActivity extends Activity implements Repository.Listener 
         if (locked) for (View v : new View[]{ project, task, duration, dateButton, notes, billableBox }) if (v != null) disable(v);
         ScrollView scroll = new ScrollView(this); scroll.addView(content);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle(locked ? "Entry details" : agentOnly ? "Edit agent usage" : "Edit time").setView(scroll);
-        if (locked) builder.setPositiveButton("Close", null);
-        else {
-            builder.setNegativeButton("Cancel", null).setPositiveButton("Save changes", null);
-            if (!isRunning) builder.setNeutralButton("Delete", null);
-        }
-        AlertDialog dialog = builder.create(); entryDialog = dialog;
+        AlertDialog dialog = new CropsDialog(locked ? "Entry details" : agentOnly ? "Edit agent usage" : "Edit time", scroll,
+            locked ? "Close" : "Save changes", locked ? null : "Cancel", !locked && !isRunning ? "Delete" : null); entryDialog = dialog;
         dialog.setOnDismissListener(d -> { if (entryDialog == dialog) entryDialog = null; });
         if (!locked) dialog.setOnShowListener(d -> {
             Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE), delete = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
@@ -476,6 +491,55 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private void notice(LinearLayout parent, String message) {
         TextView view = text(message, 13, GREEN, false); view.setBackground(shape(0xFFEAF0DF, 12, 0)); view.setPadding(dp(12), dp(10), dp(12), dp(10)); margin(parent, view, 8);
     }
+    static boolean motionEnabled() { return ValueAnimator.areAnimatorsEnabled(); }
+    private PathInterpolator ease() { return new PathInterpolator(0.2f, 0.8f, 0.2f, 1f); }
+    private void disableTree(View view) {
+        view.setEnabled(false);
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) disableTree(((ViewGroup) view).getChildAt(i));
+    }
+    /** Platform dialogs, with the same generous controls and motion as the main views. */
+    private final class CropsDialog extends AlertDialog {
+        private boolean closing;
+        CropsDialog(String title, View content, String positive, String negative, String neutral) {
+            super(MainActivity.this);
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            TextView heading = text(title, 23, INK, true); heading.setPadding(dp(24), dp(24), dp(24), dp(8)); setCustomTitle(heading);
+            setView(content);
+            if (positive != null) setButton(BUTTON_POSITIVE, positive, (android.content.DialogInterface.OnClickListener) null);
+            if (negative != null) setButton(BUTTON_NEGATIVE, negative, (android.content.DialogInterface.OnClickListener) null);
+            if (neutral != null) setButton(BUTTON_NEUTRAL, neutral, (android.content.DialogInterface.OnClickListener) null);
+        }
+        @Override public void show() {
+            super.show();
+            getWindow().setBackgroundDrawable(shape(BG, 24, 0)); getWindow().setWindowAnimations(0);
+            View decor = getWindow().getDecorView(); decor.setClipToOutline(true);
+            Button positive = getButton(BUTTON_POSITIVE), negative = getButton(BUTTON_NEGATIVE), neutral = getButton(BUTTON_NEUTRAL);
+            ViewGroup bar = (ViewGroup) positive.getParent();
+            if (bar instanceof LinearLayout) {
+                bar.removeAllViews(); ((LinearLayout) bar).setOrientation(LinearLayout.VERTICAL); bar.setPadding(0, 0, 0, 0);
+                LinearLayout actions = column(); actions.setPadding(dp(24), dp(12), dp(24), dp(20));
+                LinearLayout primary = row();
+                if (negative != null && negative.getVisibility() != View.GONE) {
+                    styleButton(negative, 0xFFE7ECDF, GREEN); primary.addView(negative, new LinearLayout.LayoutParams(0, dp(56), 1));
+                }
+                styleButton(positive, GREEN, Color.WHITE);
+                LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(0, dp(56), negative == null || negative.getVisibility() == View.GONE ? 1 : 1.4f);
+                if (negative != null && negative.getVisibility() != View.GONE) action.leftMargin = dp(10);
+                primary.addView(positive, action); actions.addView(primary);
+                if (neutral != null && neutral.getVisibility() != View.GONE) { styleButton(neutral, BG, 0xFFA23831); margin(actions, neutral, 6); }
+                bar.addView(actions, new ViewGroup.LayoutParams(-1, -2));
+            }
+            if (resumed && motionEnabled()) { decor.setAlpha(0f); decor.setTranslationY(dp(14)); decor.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(ease()).start(); }
+        }
+        @Override public void dismiss() {
+            if (!isShowing()) { super.dismiss(); return; }
+            View decor = getWindow().getDecorView();
+            if (!resumed || !motionEnabled()) { decor.animate().cancel(); super.dismiss(); return; }
+            if (closing) return;
+            closing = true; disableTree(decor); decor.animate().cancel();
+            decor.animate().alpha(0f).translationY(dp(10)).setDuration(150).setInterpolator(ease()).withEndAction(() -> CropsDialog.super.dismiss()).start();
+        }
+    }
     /** English-only UI copy, like the rest of this dependency-free interface. */
     private static void show(TextView view, CharSequence value) { view.setText(value); }
     private void disable(View view) { view.setEnabled(false); view.setAlpha(0.55f); }
@@ -497,23 +561,35 @@ public final class MainActivity extends Activity implements Repository.Listener 
     }
     private Spinner spinner(List<String> labels) {
         Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels);
-        spinner.setAdapter(adapter); spinner.setBackgroundTintList(ColorStateList.valueOf(GREEN)); spinner.setMinimumHeight(dp(48)); return spinner;
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
+            @Override public View getView(int position, View reused, ViewGroup parent) {
+                LinearLayout selected = row(); selected.setGravity(Gravity.CENTER_VERTICAL); selected.setMinimumHeight(dp(60)); selected.setPadding(dp(16), dp(8), dp(16), dp(8));
+                TextView value = text(getItem(position), 17, INK, false); value.setMaxLines(2); value.setEllipsize(TextUtils.TruncateAt.END);
+                selected.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
+                TextView arrow = text("⌄", 24, GREEN, true); arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO); arrow.setPadding(dp(12), 0, 0, 0); selected.addView(arrow);
+                return selected;
+            }
+            @Override public View getDropDownView(int position, View reused, ViewGroup parent) {
+                TextView option = (TextView) super.getDropDownView(position, reused, parent); option.setTextSize(17); option.setTextColor(INK); option.setMinimumHeight(dp(56)); option.setPadding(dp(16), dp(12), dp(16), dp(12)); return option;
+            }
+        };
+        spinner.setAdapter(adapter); spinner.setMinimumHeight(dp(60)); spinner.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), shape(Color.WHITE, 14, LINE), null)); return spinner;
     }
     private EditText field(LinearLayout parent, String label, String hint, String value, int input) {
         boolean multiline = "Notes".equals(label);
-        margin(parent, text(label, 12, MUTED, true), 12); EditText field = new EditText(this); field.setTextSize(16); field.setTextColor(INK);
+        margin(parent, text(label, 13, MUTED, true), 14); EditText field = new EditText(this); field.setTextSize(17); field.setTextColor(INK);
         field.setHintTextColor(0xFF979F95); field.setHint(hint); field.setText(value); field.setInputType(multiline ? input | InputType.TYPE_TEXT_FLAG_MULTI_LINE : input); field.setSingleLine(!multiline); field.setSelectAllOnFocus(false);
-        if (multiline) { field.setMinLines(2); field.setMaxLines(4); field.setGravity(Gravity.TOP | Gravity.START); }
-        field.setPadding(dp(12), dp(10), dp(12), dp(10)); field.setBackground(shape(0xFFFAFBF7, 10, LINE));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, multiline ? -2 : dp(48)); lp.topMargin = dp(6); parent.addView(field, lp); return field;
+        if (multiline) { field.setMinLines(2); field.setMaxLines(4); field.setMinimumHeight(dp(88)); field.setGravity(Gravity.TOP | Gravity.START); }
+        field.setPadding(dp(16), dp(16), dp(16), dp(16)); field.setBackground(shape(Color.WHITE, 14, LINE));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, multiline ? -2 : dp(60)); lp.topMargin = dp(7); parent.addView(field, lp); return field;
     }
-    private CheckBox check(String label, boolean checked) { CheckBox box = new CheckBox(this); box.setText(label); box.setTextColor(INK); box.setTextSize(13); box.setChecked(checked); box.setButtonTintList(ColorStateList.valueOf(GREEN)); return box; }
+    private CheckBox check(String label, boolean checked) { CheckBox box = new CheckBox(this); box.setText(label); box.setTextColor(INK); box.setTextSize(16); box.setChecked(checked); box.setButtonTintList(ColorStateList.valueOf(GREEN)); box.setMinHeight(dp(60)); box.setMinimumHeight(dp(60)); box.setPadding(dp(14), dp(8), dp(16), dp(8)); box.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), shape(Color.WHITE, 14, LINE), null)); return box; }
     private LinearLayout column() { LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL); return layout; }
     private LinearLayout row() { LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.HORIZONTAL); return layout; }
     private LinearLayout card(int color) { LinearLayout layout = column(); layout.setPadding(dp(16), dp(14), dp(16), dp(12)); layout.setBackground(shape(color, 16, color == Color.WHITE ? LINE : 0)); return layout; }
     private TextView text(String value, int size, int color, boolean bold) { TextView text = new TextView(this); text.setText(value); text.setTextSize(size); text.setTextColor(color); text.setLineSpacing(dp(2), 1); text.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL)); return text; }
-    private Button button(String label, int background, int color) { Button button = new Button(this); button.setText(label); button.setTextSize(15); button.setAllCaps(false); button.setTextColor(color); button.setTypeface(Typeface.DEFAULT, Typeface.BOLD); button.setMinHeight(dp(48)); button.setMinimumHeight(dp(48)); button.setPadding(dp(12), dp(4), dp(12), dp(4)); button.setStateListAnimator(null); button.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), shape(background, 14, 0), null)); return button; }
+    private Button button(String label, int background, int color) { Button button = new Button(this); button.setText(label); styleButton(button, background, color); return button; }
+    private void styleButton(Button button, int background, int color) { button.setTextSize(16); button.setAllCaps(false); button.setTextColor(color); button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL)); button.setMinHeight(dp(56)); button.setMinimumHeight(dp(56)); button.setMinWidth(0); button.setMinimumWidth(0); button.setPadding(dp(16), dp(8), dp(16), dp(8)); button.setStateListAnimator(null); button.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), shape(background, 16, 0), null)); }
     private GradientDrawable shape(int color, int radius, int stroke) { GradientDrawable drawable = new GradientDrawable(); drawable.setColor(color); drawable.setCornerRadius(dp(radius)); if (stroke != 0) drawable.setStroke(dp(1), stroke); return drawable; }
     private void margin(LinearLayout parent, View child, int top) { LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(top); parent.addView(child, params); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }

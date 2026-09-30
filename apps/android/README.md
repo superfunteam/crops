@@ -16,6 +16,8 @@ For development, run the root API server on port **8787**. An Android emulator c
 
 - Username/password login, initial workspace registration, Android Keystore encrypted session tokens, logout.
 - A compact day overview with recent entries. **Start timer** opens the native project/task/notes form only when needed; Cancel keeps the draft for next time. A confirmed start closes the form, and failures stay visible in it.
+- Generous native controls: 60 dp project pickers and text fields, multiline notes, full-row billable checkboxes, rounded cream dialogs, and 56 dp primary actions. Dialogs resize around the keyboard to keep their primary actions accessible.
+- Short page crossfades and form transitions make tab/date changes, new-timer forms, and active/idle changes feel connected. Clock ticks and unchanged polling do not replay motion. Android's system animator duration scale applies, including immediate transitions when animations are disabled.
 - Team and project selection; task, multiline notes, billable time; start, stop, and resume entries. Running timers have a smaller dark green card; the timesheet date strip and daily total stay compact.
 - Today totals, daily timesheet browsing, manual duration entry, invoiced/paid status visibility.
 - **Edit and delete time.** Tap an entry (or its labelled Edit button) to open the same form used for manual entry: project, task, notes, date, duration (hours:minutes, same parser), and billable. Save sends `PATCH /api/entries/:id` with the displayed version and only the fields you changed, so seconds under the displayed minute are never overwritten. Running entries can change project, task, notes, and billable; duration and date are disabled until stopped. Invoiced or paid entries open read-only with the reason. Stopped unbilled entries can be deleted after a confirmation dialog (`DELETE /api/entries/:id?version=N`).
@@ -47,7 +49,7 @@ For a release candidate, run `./gradlew :app:assembleRelease`; it produces an **
 
 ## Device verification
 
-A dependency-free instrumentation suite checks native registration and login, Keystore persistence, the idle overview, opening/canceling/reopening the timer form with a preserved draft, confirmed Start, foreground chronometer and Stop action, stale UI/notification Stop after a remote stop-and-resume, manual entry, native edit/save and confirmed delete, stale-version edit/delete conflicts, running-entry edit rules, mixed time/agent labels, agent-only presentation and editor, resume, and background cross-device start/stop. Use an isolated development database; the suite creates a fresh test account each time.
+A dependency-free instrumentation suite checks native registration and login, Keystore persistence, page transitions and their settled state, unchanged polling/clock ticks, disabled system animations, the idle overview, opening/canceling/reopening the timer form with a preserved draft, keyboard resize and primary-action visibility, confirmed Start, foreground chronometer and Stop action, stale UI/notification Stop after a remote stop-and-resume, manual entry, native edit/save and confirmed delete, stale-version edit/delete conflicts, running-entry edit rules, mixed time/agent labels, agent-only presentation and editor, resume, and background cross-device start/stop. Use an isolated development database; the suite creates a fresh test account each time. Motion checks temporarily change the test device's system animator scale and restore its original value.
 
 ```sh
 # From the repository root, in another terminal:

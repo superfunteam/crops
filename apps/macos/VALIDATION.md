@@ -73,3 +73,14 @@ Completed September 30, 2026 with Apple Swift 6.0.3 and Command Line Tools.
 - Rendered the actual AppKit status-badge code for idle, running, and sync-warning states: forest rounded rectangle, white text, and yellow warning. The final active symbol uses `play.fill` so the triangle remains legible at status-bar size.
 
 Direct system menu-bar interaction, light/dark menu-bar rendering, actual sleep/wake, and Intel runtime were not exercised in this pass. Existing manually resized windows can retain their saved dimensions; the smaller default applies to new windows. The native apps still use ad hoc/internal distribution signing.
+
+## Version 1.4.0 (build 6) — taller forms and view transitions
+
+Completed September 30, 2026. Universal arm64 + x86_64 build and strict ad hoc signature verification passed; **82 core checks passed**. ZIP: **1,107,975 bytes**, approximately 1.1 MB. No runtime dependencies were added.
+
+- Shared embedded-label fields are 58 pt tall; Notes uses a native multiline editor. The project control is a full-height native `NSPopUpButton`, preserving native menus, selected checkmarks, accessibility, and keyboard behavior. Date/duration controls align, the Billable switch has a full-width 50 pt row, and primary actions are 48 pt tall.
+- The new-entry Start/Save action stays visible below scrolling fields in a 420 × 520 companion window. The menu-bar panel can expand to 660 pt for forms, limited by the available screen height, then return to its 520 pt overview.
+- Actual packaged-app QA used the separate local workspace on port 8797: open/cancel a form; select another project; reselect the current project without resetting Billable; enter multiline Notes with Return without submitting; switch to Manual time; validate duration; save five minutes with multiline notes and the chosen project; return to the overview with the correct daily total; open Settings.
+- View transitions are keyed only to navigation, entry-type selection, and active timer identity. Clock ticks, routine polling, and entry versions do not trigger page motion. macOS Reduce Motion disables the custom animations and pressed-button scaling.
+
+The final full-width switch and date-height adjustment were rebuilt after visual QA. Direct menu-bar panel resizing and changing the OS Reduce Motion preference were not driven in this pass; their behavior was reviewed in source and compiled for macOS 13+. Intel was cross-compiled, not run.

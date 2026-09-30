@@ -66,7 +66,7 @@ Android platform Views ────┘
 Local development: same API + SQL, using filesystem-persisted PGlite.
 ```
 
-- The native apps depend only on OS frameworks. Android is roughly 55 KB; the universal Mac ZIP is around 1 MB.
+- The native apps depend only on OS frameworks. Android is roughly 105 KB; the universal Mac ZIP is around 1.1 MB.
 - Web JavaScript is approximately 86 KB gzip, CSS 8 KB gzip, plus the self-hosted Inter font. Native downloads are separate.
 - Production uses native Netlify Database with branch-aware connections and `pg` transactions. Netlify applies SQL migrations during deployment. Local PGlite needs no Docker or database account. Production refuses to fall back to filesystem storage.
 - No external font, analytics, advertising, or image requests are needed by the web UI.

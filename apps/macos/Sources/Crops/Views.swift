@@ -18,29 +18,14 @@ enum Palette {
     }
 }
 
-struct PrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 13, weight: .semibold))
-            .frame(maxWidth: .infinity).frame(height: 36)
-            .foregroundStyle(.white).background(Palette.forest.opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.4), in: RoundedRectangle(cornerRadius: 9))
-    }
-}
-
-struct CompactActionStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.padding(.horizontal, 11).frame(height: 28)
-            .foregroundStyle(.white)
-            .background(Palette.forest.opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.4), in: RoundedRectangle(cornerRadius: 7))
-    }
-}
-
 struct RootView: View {
     @EnvironmentObject var store: CropsStore
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var isPopover = false
     @State private var showSettings = false
+    @State private var expandedForm = false
+    private var route: String { showSettings ? "settings" : !store.signedIn ? "login" : store.state == nil ? "loading" : "tracker" }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
@@ -64,16 +49,21 @@ struct RootView: View {
                     .buttonStyle(.plain).help(showSettings ? "Close settings" : "Settings").accessibilityLabel(showSettings ? "Close settings" : "Settings")
             }.padding(.horizontal, 20).padding(.top, isPopover ? 14 : 22).padding(.bottom, 14)
 
-            if showSettings { SettingsView(close: { showSettings = false }) }
-            else if !store.signedIn { LoginView() }
-            else if store.state == nil {
-                VStack(spacing: 16) {
-                    ProgressView().controlSize(.large)
-                    Text("Gathering your time…").font(.headline)
-                    ErrorBanner()
-                    Button("Try again") { Task { await store.sync() } }.disabled(store.refreshing)
-                }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else { TrackerView() }
+            ZStack(alignment: .top) {
+                Group {
+                    if showSettings { SettingsView(close: { showSettings = false }) }
+                    else if !store.signedIn { LoginView() }
+                    else if store.state == nil {
+                        VStack(spacing: 16) {
+                            ProgressView().controlSize(.large)
+                            Text("Gathering your time…").font(.headline)
+                            ErrorBanner()
+                            Button("Try again") { Task { await store.sync() } }.disabled(store.refreshing)
+                        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else { TrackerView(onFormChange: { expandedForm = $0 }) }
+                }.id(route).transition(CropsMotion.transition(reduceMotion))
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(CropsMotion.animation(reduceMotion), value: route)
 
             Divider().opacity(0.45)
             HStack(spacing: 6) {
@@ -91,6 +81,9 @@ struct RootView: View {
             }.foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
         }
         .foregroundStyle(Palette.ink).background(Palette.background).tint(Palette.accent)
+        .frame(height: isPopover ? min(expandedForm ? 660 : 520, (NSScreen.main?.visibleFrame.height ?? 720) - 60) : nil)
+        .animation(CropsMotion.animation(reduceMotion), value: expandedForm)
+        .onChange(of: route) { value in if value != "tracker" { expandedForm = false } }
         .task { await store.sync() }
     }
 }
@@ -109,27 +102,9 @@ struct ErrorBanner: View {
     }
 }
 
-struct InputField: View {
-    let label: String
-    var placeholder = ""
-    @Binding var text: String
-    var secure = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-            Group {
-                if secure { SecureField(placeholder, text: $text) }
-                else { TextField(placeholder, text: $text) }
-            }.textFieldStyle(.plain).font(.system(size: 13)).padding(8)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.ink.opacity(0.12), lineWidth: 1))
-                .accessibilityLabel(label)
-        }
-    }
-}
-
 struct LoginView: View {
     @EnvironmentObject var store: CropsStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var username = ""
     @State private var password = ""
     @State private var name = ""
@@ -149,7 +124,7 @@ struct LoginView: View {
                     HStack(alignment: .top, spacing: 10) {
                         InputField(label: "Your name", placeholder: "Alex", text: $name)
                         InputField(label: "Team name", placeholder: "Acme Studio", text: $teamName)
-                    }
+                    }.transition(CropsMotion.transition(reduceMotion))
                 }
                 InputField(label: "Username", placeholder: "your.username", text: $username)
                 InputField(label: "Password", placeholder: registering ? "At least 8 characters" : "Your password", text: $password, secure: true)
@@ -162,62 +137,84 @@ struct LoginView: View {
                 Button(registering ? "Already have an account? Sign in" : "New here? Create a workspace") { registering.toggle(); store.error = nil }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Palette.accent).frame(maxWidth: .infinity)
                 Text("Use the same server and account on every device.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.top, 4)
             }.padding(.horizontal, 28).padding(.top, 8).padding(.bottom, 24)
+                .animation(CropsMotion.animation(reduceMotion), value: registering)
         }.onAppear { address = store.serverAddress }
     }
 }
 
 struct TrackerView: View {
     @EnvironmentObject var store: CropsStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showComposer = false
     @State private var manual = false
     @State private var duration = ""
     @State private var manualDate = Date()
     @State private var editing: Entry?
     @State private var pendingDelete: Entry?
+    var onFormChange: (Bool) -> Void = { _ in }
+    private var route: String { showComposer ? "composer" : editing.map { "edit-\($0.id)" } ?? "overview" }
     var body: some View {
-        ScrollView {
+        VStack(spacing: 0) {
+          ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 ErrorBanner()
-                if showComposer { composer }
-                else if let editing { EntryEditView(entry: editing) { self.editing = nil }.id(editing.id) }
-                else {
-                    WeekStrip()
-                    if let running = store.state?.runningEntry { runningCard(running) }
-                    HStack(alignment: .center, spacing: 10) {
-                        Text(Calendar.current.isDateInToday(store.selectedDay) ? "Today" : store.selectedDay.formatted(.dateTime.month(.abbreviated).day())).font(.system(size: 17, weight: .medium, design: .serif))
-                        Text(CropsTime.clock(store.dayTotal, seconds: false)).font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
-                        Spacer()
-                        Button {
-                            manual = false; duration = ""; manualDate = min(store.selectedDay, Date())
-                            store.task = ""; store.notes = ""; showComposer = true
-                        } label: { Label(store.state?.runningEntry == nil ? "Start timer" : "New timer", systemImage: "plus").font(.system(size: 11, weight: .semibold)) }
-                            .buttonStyle(CompactActionStyle())
-                            .disabled(store.busy).keyboardShortcut("n").accessibilityLabel("New entry")
-                    }.padding(.top, 2)
-                    if store.dayEntries.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "sun.horizon").font(.system(size: 25, weight: .light)).foregroundStyle(Palette.accent)
-                            Text("A fresh start.").font(.system(size: 13, weight: .medium))
-                            Text("The time you track will appear here.").font(.system(size: 11)).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity).padding(.vertical, 18)
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach(store.dayEntries) { entry in
-                                EntryRow(entry: entry, edit: { store.error = nil; editing = entry }, requestDelete: { pendingDelete = entry })
-                                if entry.id != store.dayEntries.last?.id { Divider().padding(.leading, 25).opacity(0.5) }
-                            }
-                        }.padding(.horizontal, 12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    if store.state?.runningEntry != nil {
-                        Text("Your timer keeps running when this window closes.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
-                    }
-                }
+                ZStack(alignment: .topLeading) {
+                    Group {
+                        if showComposer { composer }
+                        else if let editing { EntryEditView(entry: editing) { self.editing = nil }.id(editing.id) }
+                        else { overview }
+                    }.id(route).transition(CropsMotion.transition(reduceMotion))
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }.padding(.horizontal, 20).padding(.bottom, 14)
-        }.onChange(of: store.state?.team.id) { _ in showComposer = false; editing = nil }
+          }
+          if showComposer && !store.activeProjects.isEmpty {
+              composerAction.padding(.horizontal, 20).padding(.vertical, 12)
+                  .background(Palette.background)
+                  .overlay(alignment: .top) { Divider().opacity(0.35) }
+                  .transition(.opacity)
+          }
+        }.animation(CropsMotion.animation(reduceMotion), value: route)
+        .onAppear { onFormChange(route != "overview") }
+        .onChange(of: route) { value in onFormChange(value != "overview") }
+        .onChange(of: store.state?.team.id) { _ in showComposer = false; editing = nil }
         .confirmationDialog("Delete this entry?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible, presenting: pendingDelete) { entry in
             Button("Delete entry", role: .destructive) { Task { await store.delete(entry: entry) } }
             Button("Cancel", role: .cancel) {}
         } message: { entry in Text(deleteMessage(entry, store: store)) }
+    }
+    private var overview: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WeekStrip()
+            if let running = store.state?.runningEntry { runningCard(running).transition(CropsMotion.transition(reduceMotion)) }
+            HStack(alignment: .center, spacing: 10) {
+                Text(Calendar.current.isDateInToday(store.selectedDay) ? "Today" : store.selectedDay.formatted(.dateTime.month(.abbreviated).day())).font(.system(size: 17, weight: .medium, design: .serif))
+                Text(CropsTime.clock(store.dayTotal, seconds: false)).font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    manual = false; duration = ""; manualDate = min(store.selectedDay, Date())
+                    store.task = ""; store.notes = ""; showComposer = true
+                } label: { Label(store.state?.runningEntry == nil ? "Start timer" : "New timer", systemImage: "plus").font(.system(size: 11, weight: .semibold)) }
+                    .buttonStyle(CompactActionStyle())
+                    .disabled(store.busy).keyboardShortcut("n").accessibilityLabel("New entry")
+            }.padding(.top, 2)
+            if store.dayEntries.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "sun.horizon").font(.system(size: 25, weight: .light)).foregroundStyle(Palette.accent)
+                    Text("A fresh start.").font(.system(size: 13, weight: .medium))
+                    Text("The time you track will appear here.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity).padding(.vertical, 18)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(store.dayEntries) { entry in
+                        EntryRow(entry: entry, edit: { store.error = nil; editing = entry }, requestDelete: { pendingDelete = entry })
+                        if entry.id != store.dayEntries.last?.id { Divider().padding(.leading, 25).opacity(0.5) }
+                    }
+                }.padding(.horizontal, 12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if store.state?.runningEntry != nil {
+                Text("Your timer keeps running when this window closes.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+            }
+        }.animation(CropsMotion.animation(reduceMotion), value: store.state?.runningEntry?.id)
     }
     private func runningCard(_ entry: Entry) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -229,9 +226,9 @@ struct TrackerView: View {
                 Spacer()
                 Button { Task { await store.stop(entry: entry) } } label: {
                     Label(store.busy ? "Saving…" : "Stop", systemImage: "stop.fill")
-                        .font(.system(size: 12, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
-                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.16)))
+                        .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 16).frame(height: 40)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.16)))
                 }.buttonStyle(.plain).disabled(store.busy).keyboardShortcut(".").accessibilityLabel("Stop timer")
             }
             VStack(alignment: .leading, spacing: 3) {
@@ -246,61 +243,55 @@ struct TrackerView: View {
         }.foregroundStyle(.white).padding(14).background(Palette.forest, in: RoundedRectangle(cornerRadius: 12))
     }
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button { showComposer = false } label: { Label("Back", systemImage: "chevron.left") }
-                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).disabled(store.busy)
+                    .buttonStyle(BackButtonStyle()).disabled(store.busy)
                     .keyboardShortcut(.cancelAction).accessibilityLabel("Cancel new entry")
                 Spacer()
-                Text("NEW ENTRY").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
-            }.padding(.bottom, 6)
-            Picker("Entry type", selection: $manual) {
-                Text("Timer").tag(false)
-                Text("Manual time").tag(true)
-            }.pickerStyle(.segmented).labelsHidden().disabled(store.busy)
+                Text("New entry").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            }
             HStack {
-                Text(manual ? "Add a little time." : "What are you working on?").font(.system(size: 18, weight: .medium, design: .serif))
+                Text(manual ? "Add manual time" : "What are you working on?").font(.system(size: 22, weight: .medium, design: .serif)).tracking(-0.4)
                 Spacer()
             }
+            EntryTypeControl(manual: $manual).disabled(store.busy)
             if store.activeProjects.isEmpty {
                 Text("Your team is ready. Add a project in the web app to start tracking.").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button("Add your first project") { store.openWeb() }.buttonStyle(PrimaryButtonStyle())
             } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Project").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                    Picker("Project", selection: Binding(get: { store.selectedProject }, set: { store.selectProject($0) })) {
-                        ForEach(store.activeProjects) { project in
-                            Text((store.clientName(project.id).map { "\($0) · " } ?? "") + project.name).tag(project.id)
-                        }
-                    }.labelsHidden().pickerStyle(.menu).controlSize(.large).frame(maxWidth: .infinity).accessibilityLabel("Project")
-                }
-                InputField(label: "Task", placeholder: "Design, development, a good idea…", text: $store.task)
-                InputField(label: "Notes · optional", placeholder: "A few details for later", text: $store.notes)
+                ProjectControl(projects: store.activeProjects, selection: Binding(get: { store.selectedProject }, set: { store.selectProject($0) })).disabled(store.busy)
+                InputField(label: "Task", placeholder: "Design, development…", text: $store.task).disabled(store.busy)
+                InputField(label: "Notes · optional", placeholder: "A few details for later", text: $store.notes, multiline: true).disabled(store.busy)
                 if manual {
-                    HStack(alignment: .bottom, spacing: 12) {
+                    HStack(alignment: .top, spacing: 10) {
                         InputField(label: "Duration (hours)", placeholder: "1:30 or 1.5", text: $duration)
-                        DatePicker("Date", selection: $manualDate, in: ...Date(), displayedComponents: .date).datePickerStyle(.field).font(.system(size: 11)).frame(width: 155).padding(.bottom, 9)
-                    }
+                        DateControl(date: $manualDate)
+                    }.disabled(store.busy).transition(CropsMotion.transition(reduceMotion))
                 }
-                Toggle("Billable", isOn: $store.billable).toggleStyle(.checkbox).font(.system(size: 11))
+                BillableControl(isOn: $store.billable).disabled(store.busy)
                 if !manual && store.state?.runningEntry != nil {
                     Text("Starting a new timer will stop your current timer and save its time.").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                Button {
-                    Task {
-                        if manual {
-                            if await store.addManual(date: manualDate, duration: duration) {
-                                store.selectedDay = Calendar.current.startOfDay(for: manualDate); showComposer = false
-                            }
-                        } else if await store.start() {
-                            store.selectedDay = Calendar.current.startOfDay(for: Date()); showComposer = false
-                        }
-                    }
-                } label: { HStack { Image(systemName: manual ? "plus" : "play.fill").font(.system(size: 10)); Text(store.busy ? "Saving…" : manual ? "Save time" : "Start timer") } }
-                    .buttonStyle(PrimaryButtonStyle()).disabled(store.busy || store.selectedProject.isEmpty || (manual && CropsTime.parseDuration(duration) == nil))
-                    .keyboardShortcut(.defaultAction)
             }
-        }
+        }.animation(CropsMotion.animation(reduceMotion), value: manual)
+    }
+    private var composerAction: some View {
+        Button {
+            Task {
+                if manual {
+                    if await store.addManual(date: manualDate, duration: duration) {
+                        store.selectedDay = Calendar.current.startOfDay(for: manualDate); showComposer = false
+                    }
+                } else if await store.start() {
+                    store.selectedDay = Calendar.current.startOfDay(for: Date()); showComposer = false
+                }
+            }
+        } label: {
+            Label(store.busy ? "Saving…" : manual ? "Save time" : "Start timer", systemImage: manual ? "plus" : "play.fill")
+        }.buttonStyle(PrimaryButtonStyle())
+            .disabled(store.busy || store.selectedProject.isEmpty || (manual && CropsTime.parseDuration(duration) == nil))
+            .keyboardShortcut(.defaultAction)
     }
 }
 
@@ -428,7 +419,7 @@ struct EntryEditView: View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
                 Button(action: close) { Label("Back", systemImage: "chevron.left") }
-                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).disabled(store.busy)
+                    .buttonStyle(BackButtonStyle()).disabled(store.busy)
                     .keyboardShortcut(.cancelAction).accessibilityLabel("Back to timesheet")
                 Spacer()
                 Text(lockReason != nil ? "ENTRY DETAILS" : "EDIT ENTRY").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
@@ -458,38 +449,27 @@ struct EntryEditView: View {
                 }.padding(10).background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
             }
             Group {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Project").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                    Picker("Project", selection: Binding(get: { draft.projectId }, set: { id in
+                ProjectControl(projects: projectOptions, selection: Binding(get: { draft.projectId }, set: { id in
                         guard id != draft.projectId else { return }
                         draft.projectId = id
                         if let project = store.project(id) { draft.billable = project.billable }
-                    })) {
-                        ForEach(projectOptions) { project in
-                            Text((store.clientName(project.id).map { "\($0) · " } ?? "") + project.name + (project.archived == true ? " (archived)" : "")).tag(project.id)
-                        }
-                    }.labelsHidden().pickerStyle(.menu).controlSize(.large).frame(maxWidth: .infinity).accessibilityLabel("Project")
-                }
-                InputField(label: "Task", placeholder: "Design, development, a good idea…", text: $draft.task)
-                InputField(label: "Notes · optional", placeholder: "A few details for later", text: $draft.notes)
-                HStack(alignment: .bottom, spacing: 12) {
-                    if base.isAgentOnly {
-                        Text("Date").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                        Spacer()
-                    } else if base.isRunning {
+                    }))
+                InputField(label: "Task", placeholder: "Design, development…", text: $draft.task)
+                InputField(label: "Notes · optional", placeholder: "A few details for later", text: $draft.notes, multiline: true)
+                HStack(alignment: .top, spacing: 10) {
+                    if base.isRunning {
                         InputField(label: "Duration (hours)", text: .constant(CropsTime.clock(store.elapsed(base)))).disabled(true)
-                    } else {
+                    } else if !base.isAgentOnly {
                         InputField(label: "Duration (hours)", placeholder: "1:30, 1.5, or 1:30:15", text: $draft.duration)
                     }
-                    DatePicker("Date", selection: dayBinding, in: ...max(Date(), CropsTime.date(fromKey: base.date) ?? Date()), displayedComponents: .date)
-                        .datePickerStyle(.field).font(.system(size: 11)).frame(width: 155).padding(.bottom, 9).disabled(base.isRunning)
+                    DateControl(date: dayBinding, latest: max(Date(), CropsTime.date(fromKey: base.date) ?? Date())).disabled(base.isRunning)
                 }
                 if base.isRunning {
                     Label("Stop the timer to change its date or duration.", systemImage: "clock").font(.system(size: 11)).foregroundStyle(.secondary)
                 } else if lockReason == nil && !durationValid {
                     Text(EntryEditError.invalidDuration.localizedDescription).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 }
-                Toggle("Billable", isOn: $draft.billable).toggleStyle(.checkbox).font(.system(size: 11))
+                BillableControl(isOn: $draft.billable)
             }.disabled(lockReason != nil || store.busy)
             if let agent = base.agent {
                 VStack(alignment: .leading, spacing: 4) {

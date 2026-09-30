@@ -25,7 +25,7 @@ final class CropsAppDelegate: NSObject, NSApplicationDelegate {
         }
         MenuBarExtra(isInserted: .constant(true)) {
             RootView(isPopover: true).environmentObject(store)
-                .frame(width: 400, height: min(520, (NSScreen.main?.visibleFrame.height ?? 620) - 60))
+                .frame(width: 400)
         } label: {
             Image(nsImage: MenuBadge.image(for: store.menuStatus))
                 .help(store.menuHelp).accessibilityLabel(store.menuHelp)

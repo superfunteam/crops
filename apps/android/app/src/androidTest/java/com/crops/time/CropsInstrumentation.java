@@ -45,6 +45,7 @@ public final class CropsInstrumentation extends Instrumentation {
             Activity activity = startActivitySync(new Intent(getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             MainActivity main = (MainActivity) activity;
+            motionChecks(main);
             final java.util.List<android.widget.EditText> composerFields = new java.util.ArrayList<>();
             runOnMainSync(() -> collect(activity.getWindow().getDecorView(), composerFields));
             require(composerFields.isEmpty() && main.timerDialog == null, "Idle overview has no timer form");
@@ -62,13 +63,14 @@ public final class CropsInstrumentation extends Instrumentation {
                 main.timerDialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).performClick();
             });
             waitForIdleSync();
-            require(main.timerDialog == null && repo.running() == null, "Cancel returns to the compact overview");
+            await(() -> main.timerDialog == null && repo.running() == null, 5000, "Cancel returns to the compact overview");
             composerFields.clear();
             runOnMainSync(() -> {
                 findButton(activity.getWindow().getDecorView(), "Start timer").performClick();
                 collect(main.timerDialog.getWindow().getDecorView(), composerFields);
             });
             require(composerFields.get(0).getText().toString().equals("Native timer draft") && composerFields.get(1).getText().toString().equals("Draft context\nSecond line"), "Reopening preserves the project/task/notes draft");
+            keyboardChecks(main, composerFields.get(0));
             runOnMainSync(() -> main.timerDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
             await(() -> !repo.busy && repo.running() != null, 20000, "Start timer through native button");
             await(() -> main.timerDialog == null, 5000, "Confirmed Start closes the composer");
@@ -126,6 +128,69 @@ public final class CropsInstrumentation extends Instrumentation {
             result.putString("stream", "\nFAIL after " + checks + " checks: " + error + "\n" + android.util.Log.getStackTraceString(error));
             finish(Activity.RESULT_CANCELED, result);
         }
+    }
+    private void motionChecks(MainActivity main) throws Exception {
+        String original = android.provider.Settings.Global.getString(getTargetContext().getContentResolver(), "animator_duration_scale");
+        try {
+            setting("1");
+            await(MainActivity::motionEnabled, 5000, "System animations are enabled for motion checks");
+            final View[] scroller = { null }; final float[] initial = { 1f };
+            runOnMainSync(() -> {
+                findButton(main.getWindow().getDecorView(), "Timesheet").performClick();
+                View title = findTextView(main.getWindow().getDecorView(), "Timesheet"); scroller[0] = (View) title.getParent().getParent(); initial[0] = scroller[0].getAlpha();
+            });
+            require(initial[0] < 1f, "Tab change starts a smooth page crossfade");
+            await(() -> scroller[0].getAlpha() == 1f && scroller[0].getTranslationY() == 0f, 5000, "Page motion finishes at full opacity and its original position");
+            runOnMainSync(() -> repo.refresh());
+            await(() -> !repo.refreshing, 20000, "Poll completes during motion verification");
+            Thread.sleep(1200);
+            require(scroller[0].getAlpha() == 1f && scroller[0].getTranslationY() == 0f, "Polling and clock ticks do not replay page motion");
+            setting("0");
+            await(() -> !MainActivity.motionEnabled(), 5000, "System disabled animations are observed");
+            runOnMainSync(() -> {
+                findButton(main.getWindow().getDecorView(), "Timer").performClick();
+                View title = findTextView(main.getWindow().getDecorView(), "Your day"); scroller[0] = (View) title.getParent().getParent();
+            });
+            require(scroller[0].getAlpha() == 1f && scroller[0].getTranslationY() == 0f, "Reduced motion switches pages immediately");
+            final boolean[] still = { false };
+            runOnMainSync(() -> { findButton(main.getWindow().getDecorView(), "Start timer").performClick(); View dialog = main.timerDialog.getWindow().getDecorView(); still[0] = dialog.getAlpha() == 1f && dialog.getTranslationY() == 0f; });
+            require(still[0], "Reduced motion opens the timer form immediately");
+            runOnMainSync(() -> main.timerDialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).performClick());
+            await(() -> main.timerDialog == null, 5000, "Reduced motion closes the timer form immediately");
+        } finally {
+            setting(original == null ? "1" : original);
+            await(() -> MainActivity.motionEnabled() == (original == null || Float.parseFloat(original) > 0), 5000, "Original system animation preference restored");
+        }
+    }
+    private void setting(String value) throws Exception {
+        try (android.os.ParcelFileDescriptor command = getUiAutomation().executeShellCommand("settings put global animator_duration_scale " + value);
+             java.io.InputStream output = new android.os.ParcelFileDescriptor.AutoCloseInputStream(command)) { while (output.read() != -1) {} }
+    }
+    private void keyboardChecks(MainActivity main, android.widget.EditText field) throws Exception {
+        android.view.inputmethod.InputMethodManager keyboard = main.getSystemService(android.view.inputmethod.InputMethodManager.class);
+        View decor = main.timerDialog.getWindow().getDecorView();
+        int displayHeight = getTargetContext().getResources().getDisplayMetrics().heightPixels;
+        int threshold = Math.round(200 * getTargetContext().getResources().getDisplayMetrics().density);
+        runOnMainSync(field::requestFocus);
+        await(() -> field.hasWindowFocus() && field.isFocused(), 5000, "Timer form is focused before showing the keyboard");
+        waitForIdleSync();
+        runOnMainSync(() -> keyboard.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT));
+        await(() -> { android.graphics.Rect frame = new android.graphics.Rect(); decor.getWindowVisibleDisplayFrame(frame); return frame.bottom < displayHeight - threshold; }, 5000, "Native task field opens the keyboard");
+        final boolean[] visible = { false };
+        runOnMainSync(() -> {
+            android.graphics.Rect frame = new android.graphics.Rect(), action = new android.graphics.Rect(); decor.getWindowVisibleDisplayFrame(frame);
+            Button start = main.timerDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+            visible[0] = start.getGlobalVisibleRect(action) && action.height() == start.getHeight() && action.bottom <= frame.bottom;
+        });
+        require(visible[0], "Dialog resize keeps the full Start action visible above the keyboard");
+        runOnMainSync(() -> keyboard.hideSoftInputFromWindow(field.getWindowToken(), 0));
+        await(() -> { android.graphics.Rect frame = new android.graphics.Rect(); decor.getWindowVisibleDisplayFrame(frame); return frame.bottom >= displayHeight - threshold; }, 5000, "Keyboard dismissal restores the full form");
+    }
+    private View findTextView(View view, String value) {
+        if (!view.isEnabled()) return null;
+        if (view instanceof android.widget.TextView && ((android.widget.TextView) view).getText().toString().equals(value)) return view;
+        if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) { View found = findTextView(((ViewGroup) view).getChildAt(i), value); if (found != null) return found; }
+        return null;
     }
     private JSONObject entry(String id) {
         org.json.JSONArray all = repo.array("entries");
@@ -244,6 +309,7 @@ public final class CropsInstrumentation extends Instrumentation {
     private static final class JSONObjectBuilder { final JSONObject json = new JSONObject(); JSONObjectBuilder put(String k, Object v) { try { json.put(k, v); } catch (Exception e) { throw new IllegalStateException(e); } return this; } }
     private JSONObject findTask(String task) { org.json.JSONArray all = repo.array("entries"); for (int i = 0; i < all.length(); i++) { JSONObject e = all.optJSONObject(i); if (e != null && task.equals(e.optString("task"))) return e; } return null; }
     private View findDescribed(View view, String prefix) {
+        if (!view.isEnabled()) return null;
         if (view.getContentDescription() != null && view.getContentDescription().toString().startsWith(prefix) && view instanceof Button) return view;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) { View found = findDescribed(((ViewGroup) view).getChildAt(i), prefix); if (found != null) return found; }
         return null;
@@ -264,6 +330,7 @@ public final class CropsInstrumentation extends Instrumentation {
         require(condition.getAsBoolean(), label + (repo.error.isEmpty() ? "" : " — " + repo.error));
     }
     private Button findButton(View view, String contains) {
+        if (!view.isEnabled()) return null;
         if (view instanceof Button && ((Button) view).getText().toString().contains(contains)) return (Button) view;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) { Button button = findButton(((ViewGroup) view).getChildAt(i), contains); if (button != null) return button; }
         return null;
