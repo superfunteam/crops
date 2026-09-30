@@ -61,3 +61,15 @@ Completed September 16, 2026 with Apple Swift 6.0.3 and Command Line Tools.
 - `CropsCheck` against an isolated local API (fresh data directory, port 8796, disposable registered account): passed login, conditional state, idempotent manual entry with agent usage decoded from state, PATCH of task/notes/duration (`1:30:15`) with the version, 409 on a stale PATCH and stale DELETE, DELETE with the current version, running-entry task edit (date/duration omitted), 409 on running duration change and running delete, start/stop/resume/stale-stop, deletion of the stopped timer entry, and logout. The API was shut down afterwards.
 
 Not verified: the SwiftUI edit form, row pencil/double-click/context menu, confirmation dialogs, and Return/Escape/`⌘⌫` shortcuts were compiled but not driven interactively in this pass (the UI automation available could not target an ad hoc QA copy of the app). In particular, `⌘⌫` while a text field has focus should be confirmed by hand. The Intel slice was built, not run.
+
+## Version 1.3.0 (build 5) — compact overview and green status badge
+
+Completed September 30, 2026 with Apple Swift 6.0.3 and Command Line Tools.
+
+- Universal arm64 + x86_64 build and strict ad hoc signature verification passed. ZIP: **1,002,829 bytes**, approximately 1 MB. The matching ZIP is included in the public downloads.
+- **82 core checks passed**, including idle/signed-out/loading `CROPS` labels, advancing running/offline clocks, and distinguishing token-only entries from entries that also contain human time.
+- An isolated QA copy with a separate bundle identifier used a disposable local API on port 8797. The 420 × 520 window showed the compact week calendar, Start timer action, and mixed human/agent entries without an open form. Token-only usage showed **76.2M tokens · $1.66**, without a clock or Resume control; the human entry retained its 0:45 clock and Resume action.
+- Start timer opened the form and all fields fit in the window. Escape returned to the overview. A successful start returned to the smaller running card; Stop returned to the idle overview. The QA app, local API, preferences, and local Keychain session were closed/removed after checking.
+- Rendered the actual AppKit status-badge code for idle, running, and sync-warning states: forest rounded rectangle, white text, and yellow warning. The final active symbol uses `play.fill` so the triangle remains legible at status-bar size.
+
+Direct system menu-bar interaction, light/dark menu-bar rendering, actual sleep/wake, and Intel runtime were not exercised in this pass. Existing manually resized windows can retain their saved dimensions; the smaller default applies to new windows. The native apps still use ad hoc/internal distribution signing.

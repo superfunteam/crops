@@ -52,6 +52,7 @@ public struct Entry: Codable, Identifiable {
 
     public var isRunning: Bool { startedAt != nil }
     public var isLocked: Bool { status != "unbilled" }
+    public var isAgentOnly: Bool { agent != nil && durationSeconds == 0 && !isRunning }
 
     public func elapsed(at now: Date = Date(), serverOffset: TimeInterval = 0) -> TimeInterval {
         guard let startedAt, let start = CropsTime.parseISO(startedAt) else { return max(0, durationSeconds) }

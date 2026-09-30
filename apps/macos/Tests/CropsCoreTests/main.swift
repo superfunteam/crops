@@ -18,13 +18,14 @@ let lookalike = CropsServer.previousProductionOrigin + ".example.com"
 expect(CropsServer.resolvedOrigin(lookalike) == lookalike && !CropsServer.needsMigration(lookalike), "migration matches the entire origin only")
 
 let idleMenu = CropsMenuStatus(signedIn: true, loaded: true, runningElapsed: nil, healthy: true)
-expect(idleMenu.title == "0:00" && idleMenu.symbol == "pause.circle", "idle menu keeps a visible clock and distinct paused state")
+expect(idleMenu.title == "CROPS" && idleMenu.symbol == "leaf.fill", "idle menu shows the brand instead of an empty clock")
 let runningMenu = CropsMenuStatus(signedIn: true, loaded: true, runningElapsed: 3661, healthy: true)
 expect(runningMenu.title == "1:01:01" && runningMenu.symbol == "play.circle.fill", "active menu shows live seconds and running state")
 let offlineMenu = CropsMenuStatus(signedIn: true, loaded: true, runningElapsed: 3662, healthy: false)
 expect(offlineMenu.title == "1:01:02" && offlineMenu.symbol == "exclamationmark.circle", "sync failures keep the last known timer advancing with a warning")
-expect(CropsMenuStatus(signedIn: true, loaded: false, runningElapsed: nil, healthy: false).title == "—:—", "loading never claims the server timer is stopped")
-expect(CropsMenuStatus(signedIn: false, loaded: false, runningElapsed: nil, healthy: false).title == "Crops", "signed-out app stays discoverable in menu bar")
+let loadingMenu = CropsMenuStatus(signedIn: true, loaded: false, runningElapsed: nil, healthy: false)
+expect(loadingMenu.title == "CROPS" && loadingMenu.detail == "Loading your timer", "loading keeps the brand visible without claiming the server timer is stopped")
+expect(CropsMenuStatus(signedIn: false, loaded: false, runningElapsed: nil, healthy: false).title == "CROPS", "signed-out app stays discoverable in menu bar")
 
 let data = Data("""
 {"id":"e1","teamId":"t1","userId":"u1","projectId":"p1","task":"Build","notes":"","date":"2026-09-15","durationSeconds":120,"startedAt":"2026-09-15T15:00:00.000Z","billable":true,"status":"unbilled","version":1}
@@ -60,6 +61,8 @@ func decodeEntry(_ json: String) throws -> Entry { try JSONDecoder().decode(Entr
 let stopped = #"{"id":"e 2/x","teamId":"t1","userId":"u1","projectId":"p1","task":"Build","notes":"Draft","date":"2026-09-14","durationSeconds":5400,"startedAt":null,"billable":true,"status":"unbilled","version":7"#
 let withAgent = try decodeEntry(stopped + #","agent":{"tokens":2410000,"cost":31.4,"model":"claude-opus-5"}}"#)
 expect(withAgent.agent == AgentUsage(tokens: 2410000, cost: 31.4, model: "claude-opus-5") && withAgent.agent?.label == "2.41M tokens · $31.40", "decode and label agent usage")
+let agentOnly = try decodeEntry(stopped.replacingOccurrences(of: "5400", with: "0") + #","agent":{"tokens":2410000,"cost":31.4}}"#)
+expect(agentOnly.isAgentOnly && !withAgent.isAgentOnly && !entry.isAgentOnly, "only stopped agent entries without human time are token-only")
 let withoutAgent = try decodeEntry(stopped + "}"), nullAgent = try decodeEntry(stopped + #","agent":null}"#)
 expect(withoutAgent.agent == nil && nullAgent.agent == nil, "older servers and null usage decode")
 let malformedAgent = try decodeEntry(stopped + #","agent":{"tokens":"many"}}"#)

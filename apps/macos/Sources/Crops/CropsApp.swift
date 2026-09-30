@@ -10,9 +10,9 @@ final class CropsAppDelegate: NSObject, NSApplicationDelegate {
     @StateObject private var store = CropsStore()
     var body: some Scene {
         Window("Crops", id: "crops") {
-            RootView().environmentObject(store).frame(minWidth: 420, minHeight: 480)
+            RootView().environmentObject(store).frame(minWidth: 400, minHeight: 420)
         }
-        .defaultSize(width: 440, height: 640)
+        .defaultSize(width: 420, height: 520)
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -25,12 +25,10 @@ final class CropsAppDelegate: NSObject, NSApplicationDelegate {
         }
         MenuBarExtra(isInserted: .constant(true)) {
             RootView(isPopover: true).environmentObject(store)
-                .frame(width: 420, height: min(640, (NSScreen.main?.visibleFrame.height ?? 740) - 60))
+                .frame(width: 400, height: min(520, (NSScreen.main?.visibleFrame.height ?? 620) - 60))
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: store.menuStatus.symbol)
-                Text(store.menuStatus.title).monospacedDigit()
-            }.help(store.menuHelp).accessibilityLabel(store.menuHelp)
+            Image(nsImage: MenuBadge.image(for: store.menuStatus))
+                .help(store.menuHelp).accessibilityLabel(store.menuHelp)
         }
         .menuBarExtraStyle(.window)
     }

@@ -15,11 +15,13 @@ For development, run the root API server on port **8787**. An Android emulator c
 ## Features
 
 - Username/password login, initial workspace registration, Android Keystore encrypted session tokens, logout.
-- Team and project selection; task, notes, billable time; start, stop, and resume entries.
+- A compact day overview with recent entries. **Start timer** opens the native project/task/notes form only when needed; Cancel keeps the draft for next time. A confirmed start closes the form, and failures stay visible in it.
+- Team and project selection; task, multiline notes, billable time; start, stop, and resume entries. Running timers have a smaller dark green card; the timesheet date strip and daily total stay compact.
 - Today totals, daily timesheet browsing, manual duration entry, invoiced/paid status visibility.
 - **Edit and delete time.** Tap an entry (or its labelled Edit button) to open the same form used for manual entry: project, task, notes, date, duration (hours:minutes, same parser), and billable. Save sends `PATCH /api/entries/:id` with the displayed version and only the fields you changed, so seconds under the displayed minute are never overwritten. Running entries can change project, task, notes, and billable; duration and date are disabled until stopped. Invoiced or paid entries open read-only with the reason. Stopped unbilled entries can be deleted after a confirmation dialog (`DELETE /api/entries/:id?version=N`).
 - Conflicts stay visible: if the entry changed elsewhere (409) or disappeared (404), Crops refetches state, shows the error in the dialog and sync status, and disables resending that stale revision. Reopen the entry to edit the latest version.
-- Agent usage reported for an entry is shown as a small label such as “2.41M tokens · $31.40” (model in the edit dialog). Missing, null, or malformed usage is ignored.
+- Agent usage is shown as **“Agent Usage: 2.41M tokens · $31.40”** (model in the edit dialog). Agent-only reports appear alongside time entries without a zero clock, Resume button, or duration field. Entries containing both human time and agent usage retain their timer controls. Missing, null, or malformed usage labels are ignored.
+- Entry notes preview at two lines to keep the overview focused; open the entry for its full multiline context. Token count and subscription cost editing remain available in the web workspace.
 - Foreground notification with Android's live chronometer and a Stop timer action.
 - One serialized network queue, unique idempotency keys for creates, version-checked edits and deletes, server-authoritative timer state, server-clock correction, and conditional state requests that avoid downloading unchanged history. No automatic mutation retry after an ambiguous network outcome.
 - Optional **Live cross-device sync** in Settings. A quiet, visible foreground notification checks for timers started on another device even while this app is in the background. Disable it from Settings or the notification's Pause sync action.
@@ -45,7 +47,7 @@ For a release candidate, run `./gradlew :app:assembleRelease`; it produces an **
 
 ## Device verification
 
-A dependency-free instrumentation suite checks native registration and login, Keystore persistence, the actual Start button, foreground chronometer and Stop action, stale UI/notification Stop after a remote stop-and-resume, manual entry, native edit/save and confirmed delete, stale-version edit/delete conflicts, running-entry edit rules, the agent usage label, resume, and background cross-device start/stop. Use an isolated development database; the suite creates a fresh test account each time.
+A dependency-free instrumentation suite checks native registration and login, Keystore persistence, the idle overview, opening/canceling/reopening the timer form with a preserved draft, confirmed Start, foreground chronometer and Stop action, stale UI/notification Stop after a remote stop-and-resume, manual entry, native edit/save and confirmed delete, stale-version edit/delete conflicts, running-entry edit rules, mixed time/agent labels, agent-only presentation and editor, resume, and background cross-device start/stop. Use an isolated development database; the suite creates a fresh test account each time.
 
 ```sh
 # From the repository root, in another terminal:

@@ -8,15 +8,15 @@ public struct CropsMenuStatus {
 
     public init(signedIn: Bool, loaded: Bool, runningElapsed: TimeInterval?, healthy: Bool) {
         if !signedIn {
-            title = "Crops"; symbol = "leaf"; detail = "Sign in to track time"
+            title = "CROPS"; symbol = "leaf.fill"; detail = "Sign in to track time"
         } else if let elapsed = runningElapsed {
             title = CropsTime.clock(elapsed)
             symbol = healthy ? "play.circle.fill" : "exclamationmark.circle"
             detail = healthy ? "Timer running" : "Timer running · Waiting to sync"
         } else if !loaded {
-            title = "—:—"; symbol = "arrow.triangle.2.circlepath"; detail = "Loading your timer"
+            title = "CROPS"; symbol = "arrow.triangle.2.circlepath"; detail = "Loading your timer"
         } else {
-            title = "0:00"; symbol = healthy ? "pause.circle" : "exclamationmark.circle"
+            title = "CROPS"; symbol = healthy ? "leaf.fill" : "exclamationmark.circle"
             detail = healthy ? "No timer running" : "Waiting to sync"
         }
     }

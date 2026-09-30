@@ -264,6 +264,11 @@ public final class Repository {
         Object model = agent == null ? null : agent.opt("model");
         return model instanceof String ? ((String) model).trim() : "";
     }
+    /** A usage report without human time is a token entry, not a resumable timer. */
+    static boolean agentOnly(JSONObject entry) {
+        return entry != null && entry.optJSONObject("agent") != null && entry.optLong("durationSeconds") == 0
+            && (entry.isNull("startedAt") || entry.optString("startedAt").isEmpty());
+    }
     private static boolean valid(double value) { return !Double.isNaN(value) && !Double.isInfinite(value) && value >= 0; }
     static String compact(double value) {
         if (value < 1000) return String.valueOf(Math.round(value));

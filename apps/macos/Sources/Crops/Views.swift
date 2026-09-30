@@ -22,8 +22,17 @@ struct PrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 13, weight: .semibold))
-            .frame(maxWidth: .infinity).frame(height: 38)
+            .frame(maxWidth: .infinity).frame(height: 36)
             .foregroundStyle(.white).background(Palette.forest.opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.4), in: RoundedRectangle(cornerRadius: 9))
+    }
+}
+
+struct CompactActionStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.padding(.horizontal, 11).frame(height: 28)
+            .foregroundStyle(.white)
+            .background(Palette.forest.opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.4), in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
@@ -35,8 +44,8 @@ struct RootView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
-                Image(systemName: "leaf.fill").font(.system(size: 24, weight: .medium)).foregroundStyle(Palette.accent)
-                Text("crops").font(.system(size: 25, weight: .semibold, design: .rounded)).tracking(-1)
+                Image(systemName: "leaf.fill").font(.system(size: 20, weight: .medium)).foregroundStyle(Palette.accent)
+                Text("crops").font(.system(size: 23, weight: .semibold, design: .rounded)).tracking(-1)
                 Spacer()
                 if store.signedIn {
                     Menu {
@@ -53,7 +62,7 @@ struct RootView: View {
                 }
                 Button { showSettings.toggle() } label: { Image(systemName: showSettings ? "xmark" : "gearshape").font(.system(size: 15)).frame(width: 28, height: 28) }
                     .buttonStyle(.plain).help(showSettings ? "Close settings" : "Settings").accessibilityLabel(showSettings ? "Close settings" : "Settings")
-            }.padding(.horizontal, 24).padding(.top, isPopover ? 20 : 30).padding(.bottom, 20)
+            }.padding(.horizontal, 20).padding(.top, isPopover ? 14 : 22).padding(.bottom, 14)
 
             if showSettings { SettingsView(close: { showSettings = false }) }
             else if !store.signedIn { LoginView() }
@@ -79,7 +88,7 @@ struct RootView: View {
                     Button { openWindow(id: "crops"); NSApp.activate(ignoringOtherApps: true) } label: { Image(systemName: "macwindow").font(.system(size: 12)) }.buttonStyle(.plain).help("Open Crops window").accessibilityLabel("Open Crops window")
                 }
                 Button { store.openWeb() } label: { Label("Open web", systemImage: "arrow.up.right").font(.system(size: 10, weight: .medium)) }.buttonStyle(.plain)
-            }.foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 14)
+            }.foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
         }
         .foregroundStyle(Palette.ink).background(Palette.background).tint(Palette.accent)
         .task { await store.sync() }
@@ -111,7 +120,7 @@ struct InputField: View {
             Group {
                 if secure { SecureField(placeholder, text: $text) }
                 else { TextField(placeholder, text: $text) }
-            }.textFieldStyle(.plain).font(.system(size: 13)).padding(10)
+            }.textFieldStyle(.plain).font(.system(size: 13)).padding(8)
                 .background(Palette.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.ink.opacity(0.12), lineWidth: 1))
                 .accessibilityLabel(label)
@@ -167,35 +176,30 @@ struct TrackerView: View {
     @State private var pendingDelete: Entry?
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 12) {
                 ErrorBanner()
                 if showComposer { composer }
                 else if let editing { EntryEditView(entry: editing) { self.editing = nil }.id(editing.id) }
                 else {
-                    HStack {
-                        Label(store.state?.runningEntry == nil ? "No timer running" : "Timer running", systemImage: store.state?.runningEntry == nil ? "pause.circle" : "play.circle.fill")
-                            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    WeekStrip()
+                    if let running = store.state?.runningEntry { runningCard(running) }
+                    HStack(alignment: .center, spacing: 10) {
+                        Text(Calendar.current.isDateInToday(store.selectedDay) ? "Today" : store.selectedDay.formatted(.dateTime.month(.abbreviated).day())).font(.system(size: 17, weight: .medium, design: .serif))
+                        Text(CropsTime.clock(store.dayTotal, seconds: false)).font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
                         Spacer()
                         Button {
                             manual = false; duration = ""; manualDate = min(store.selectedDay, Date())
                             store.task = ""; store.notes = ""; showComposer = true
-                        } label: { Label("New entry", systemImage: "plus").font(.system(size: 11, weight: .semibold)) }
-                            .buttonStyle(.bordered).disabled(store.busy).keyboardShortcut("n")
-                            .accessibilityLabel("New entry")
-                    }
-                    if let running = store.state?.runningEntry { runningCard(running) }
-                    WeekStrip()
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(Calendar.current.isDateInToday(store.selectedDay) ? "Today’s time" : store.selectedDay.formatted(.dateTime.month(.abbreviated).day())).font(.system(size: 17, weight: .medium, design: .serif))
-                        Spacer()
-                        Text(CropsTime.clock(store.dayTotal, seconds: false)).font(.system(size: 16, weight: .semibold)).monospacedDigit()
-                    }.padding(.top, 5)
+                        } label: { Label(store.state?.runningEntry == nil ? "Start timer" : "New timer", systemImage: "plus").font(.system(size: 11, weight: .semibold)) }
+                            .buttonStyle(CompactActionStyle())
+                            .disabled(store.busy).keyboardShortcut("n").accessibilityLabel("New entry")
+                    }.padding(.top, 2)
                     if store.dayEntries.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "sun.horizon").font(.system(size: 25, weight: .light)).foregroundStyle(Palette.accent)
                             Text("A fresh start.").font(.system(size: 13, weight: .medium))
                             Text("The time you track will appear here.").font(.system(size: 11)).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity).padding(.vertical, 26)
+                        }.frame(maxWidth: .infinity).padding(.vertical, 18)
                     } else {
                         VStack(spacing: 0) {
                             ForEach(store.dayEntries) { entry in
@@ -208,7 +212,7 @@ struct TrackerView: View {
                         Text("Your timer keeps running when this window closes.").font(.system(size: 10)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
                     }
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 22)
+            }.padding(.horizontal, 20).padding(.bottom, 14)
         }.onChange(of: store.state?.team.id) { _ in showComposer = false; editing = nil }
         .confirmationDialog("Delete this entry?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible, presenting: pendingDelete) { entry in
             Button("Delete entry", role: .destructive) { Task { await store.delete(entry: entry) } }
@@ -216,32 +220,33 @@ struct TrackerView: View {
         } message: { entry in Text(deleteMessage(entry, store: store)) }
     }
     private func runningCard(_ entry: Entry) -> some View {
-        VStack(alignment: .leading, spacing: 17) {
-            HStack {
-                Circle().fill(Palette.mint).frame(width: 6, height: 6)
-                Text("TIMER RUNNING").font(.system(size: 9, weight: .semibold)).tracking(1.5)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Running", systemImage: "circle.fill").font(.system(size: 9, weight: .medium)).foregroundStyle(Palette.mint)
+                    Text(CropsTime.clock(store.elapsed(entry))).font(.system(size: 30, weight: .light, design: .rounded)).monospacedDigit().tracking(-0.5)
+                }
                 Spacer()
-                Image(systemName: "waveform.path").foregroundStyle(Palette.mint)
-            }.foregroundStyle(Palette.mint)
-            Text(CropsTime.clock(store.elapsed(entry))).font(.system(size: 43, weight: .light, design: .rounded)).monospacedDigit().tracking(-1)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(store.project(entry.projectId)?.name ?? "Project on another team").font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                Text(entry.task.isEmpty ? "Focused work" : entry.task).font(.system(size: 12)).foregroundStyle(.white.opacity(0.75)).lineLimit(2)
-                if !entry.notes.isEmpty { Text(entry.notes).font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)).lineLimit(2) }
-                if let client = store.clientName(entry.projectId) { Text(client).font(.system(size: 10)).foregroundStyle(Palette.mint.opacity(0.8)) }
+                Button { Task { await store.stop(entry: entry) } } label: {
+                    Label(store.busy ? "Saving…" : "Stop", systemImage: "stop.fill")
+                        .font(.system(size: 12, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.16)))
+                }.buttonStyle(.plain).disabled(store.busy).keyboardShortcut(".").accessibilityLabel("Stop timer")
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(store.project(entry.projectId)?.name ?? "Project on another team").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text((store.clientName(entry.projectId).map { "\($0) · " } ?? "") + (entry.task.isEmpty ? "Focused work" : entry.task))
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
                 if entry.teamId != store.state?.team.id, let team = store.state?.teams.first(where: { $0.id == entry.teamId }) {
                     Button("Switch to \(team.name)") { Task { await store.switchTeam(team.id) } }
                         .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.mint).disabled(store.busy)
                 }
             }
-            Button { Task { await store.stop(entry: entry) } } label: {
-                HStack(spacing: 8) { Image(systemName: "stop.fill").font(.system(size: 9)); Text(store.busy ? "Saving…" : "Stop timer").font(.system(size: 12, weight: .semibold)) }.frame(maxWidth: .infinity).frame(height: 36)
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.16)))
-            }.buttonStyle(.plain).disabled(store.busy).keyboardShortcut(".")
-        }.foregroundStyle(.white).padding(20).background(Palette.forest, in: RoundedRectangle(cornerRadius: 14))
+        }.foregroundStyle(.white).padding(14).background(Palette.forest, in: RoundedRectangle(cornerRadius: 12))
     }
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack {
                 Button { showComposer = false } label: { Label("Back", systemImage: "chevron.left") }
                     .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).disabled(store.busy)
@@ -307,7 +312,7 @@ struct WeekStrip: View {
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
     }
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 6) {
             HStack {
                 Text(store.selectedDay.formatted(.dateTime.month(.wide).year())).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
@@ -319,12 +324,12 @@ struct WeekStrip: View {
                 ForEach(days, id: \.self) { day in
                     let selected = Calendar.current.isDate(day, inSameDayAs: store.selectedDay)
                     Button { store.selectedDay = day } label: {
-                        VStack(spacing: 7) {
+                        VStack(spacing: 3) {
                             Text(day.formatted(.dateTime.weekday(.narrow))).font(.system(size: 10, weight: .medium)).opacity(0.7)
                             Text(day.formatted(.dateTime.day())).font(.system(size: 14, weight: selected ? .semibold : .regular))
                             Text(CropsTime.clock(store.dayTotal(day), seconds: false)).font(.system(size: 9)).monospacedDigit().opacity(0.7)
-                        }.frame(maxWidth: .infinity).padding(.vertical, 10).foregroundStyle(selected ? .white : Palette.ink)
-                            .background(selected ? Palette.forest : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                        }.frame(maxWidth: .infinity).padding(.vertical, 7).foregroundStyle(selected ? .white : Palette.ink)
+                            .background(selected ? Palette.forest : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                     }.buttonStyle(.plain).accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month().day()) + ", " + CropsTime.clock(store.dayTotal(day), seconds: false))
                 }
             }
@@ -337,7 +342,8 @@ struct WeekStrip: View {
 
 @MainActor func deleteMessage(_ entry: Entry, store: CropsStore) -> String {
     let day = CropsTime.date(fromKey: entry.date)?.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) ?? entry.date
-    return "\(store.project(entry.projectId)?.name ?? "Project") · \(entry.task.isEmpty ? "Focused work" : entry.task) · \(CropsTime.clock(entry.durationSeconds, seconds: false)) on \(day). This can’t be undone."
+    let amount = entry.isAgentOnly ? entry.agent!.label : CropsTime.clock(entry.durationSeconds, seconds: false)
+    return "\(store.project(entry.projectId)?.name ?? "Project") · \(entry.task.isEmpty ? "Focused work" : entry.task) · \(amount) on \(day). This can’t be undone."
 }
 
 struct AgentUsageLabel: View {
@@ -345,8 +351,8 @@ struct AgentUsageLabel: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "sparkles").font(.system(size: 8))
-            Text(usage.label).font(.system(size: 9, weight: .medium)).monospacedDigit()
-        }.foregroundStyle(.secondary).accessibilityElement(children: .combine).accessibilityLabel("Agent usage: \(usage.label)")
+            Text("Agent Usage: \(usage.label)").font(.system(size: 9, weight: .medium)).monospacedDigit()
+        }.foregroundStyle(Palette.accent).accessibilityElement(children: .combine).accessibilityLabel("Agent usage: \(usage.label)")
     }
 }
 
@@ -356,7 +362,7 @@ struct EntryRow: View {
     var edit: () -> Void = {}
     var requestDelete: () -> Void = {}
     @State private var hoveringEdit = false
-    private var canResume: Bool { !entry.isRunning && !entry.isLocked && store.project(entry.projectId)?.archived != true }
+    private var canResume: Bool { !entry.isRunning && !entry.isLocked && !entry.isAgentOnly && store.project(entry.projectId)?.archived != true }
     private var canDelete: Bool { store.state.map { EntryDraft.canDelete(entry, userId: $0.user.id) } ?? false }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -364,21 +370,21 @@ struct EntryRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(store.project(entry.projectId)?.name ?? "Project").font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Text(entry.task.isEmpty ? "Focused work" : entry.task).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                if !entry.notes.isEmpty { Text(entry.notes).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1) }
+                if !entry.notes.isEmpty { Text(entry.notes).font(.system(size: 10)).foregroundStyle(Palette.ink.opacity(0.6)).lineLimit(1) }
                 if let agent = entry.agent { AgentUsageLabel(usage: agent) }
                 if entry.status != "unbilled" { Text(entry.status.capitalized).font(.system(size: 9, weight: .medium)).foregroundStyle(Palette.accent) }
             }
             Spacer(minLength: 2)
             Button(action: edit) { Image(systemName: entry.isLocked ? "lock" : "pencil").font(.system(size: 11)).frame(width: 20, height: 28).contentShape(Rectangle()) }
-                .buttonStyle(.plain).foregroundStyle(hoveringEdit ? Palette.accent : Palette.ink.opacity(0.35)).onHover { hoveringEdit = $0 }
+                .buttonStyle(.plain).foregroundStyle(hoveringEdit ? Palette.accent : Palette.ink.opacity(0.55)).onHover { hoveringEdit = $0 }
                 .help(entry.isLocked ? "View this locked entry" : "Edit this entry").accessibilityLabel(entry.isLocked ? "View \(entry.task.isEmpty ? "entry" : entry.task)" : "Edit \(entry.task.isEmpty ? "entry" : entry.task)").disabled(store.busy)
-            Text(CropsTime.clock(store.elapsed(entry), seconds: false)).font(.system(size: 14, weight: .medium)).monospacedDigit()
+            if !entry.isAgentOnly { Text(CropsTime.clock(store.elapsed(entry), seconds: false)).font(.system(size: 14, weight: .medium)).monospacedDigit() }
             if entry.startedAt != nil {
                 Image(systemName: "waveform.path").font(.system(size: 13)).foregroundStyle(Palette.accent).frame(width: 25, height: 28).accessibilityLabel("Running")
             } else if canResume {
                 Button { Task { await store.start(entry: entry) } } label: { Image(systemName: "play.circle").font(.system(size: 21, weight: .ultraLight)).frame(width: 25, height: 28) }.buttonStyle(.plain).foregroundStyle(Palette.accent).help("Resume this entry").accessibilityLabel("Resume \(entry.task.isEmpty ? "entry" : entry.task)").disabled(store.busy)
-            } else { Image(systemName: "checkmark.circle").foregroundStyle(.tertiary).frame(width: 25, height: 28) }
-        }.padding(.vertical, 14)
+            } else if !entry.isAgentOnly { Image(systemName: "checkmark.circle").foregroundStyle(.tertiary).frame(width: 25, height: 28) }
+        }.padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { if !store.busy { edit() } }
         .contextMenu {
@@ -428,7 +434,7 @@ struct EntryEditView: View {
                 Text(lockReason != nil ? "ENTRY DETAILS" : "EDIT ENTRY").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
             }.padding(.bottom, 6)
             HStack {
-                Text(lockReason != nil ? "This time is settled." : base.isRunning ? "Tend the running timer." : "Fine-tune your time.").font(.system(size: 18, weight: .medium, design: .serif))
+                Text(base.isAgentOnly ? "Agent usage" : lockReason != nil ? "This time is settled." : base.isRunning ? "Tend the running timer." : "Fine-tune your time.").font(.system(size: 18, weight: .medium, design: .serif))
                 Spacer()
             }
             if store.state != nil && latest == nil {
@@ -467,7 +473,10 @@ struct EntryEditView: View {
                 InputField(label: "Task", placeholder: "Design, development, a good idea…", text: $draft.task)
                 InputField(label: "Notes · optional", placeholder: "A few details for later", text: $draft.notes)
                 HStack(alignment: .bottom, spacing: 12) {
-                    if base.isRunning {
+                    if base.isAgentOnly {
+                        Text("Date").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                        Spacer()
+                    } else if base.isRunning {
                         InputField(label: "Duration (hours)", text: .constant(CropsTime.clock(store.elapsed(base)))).disabled(true)
                     } else {
                         InputField(label: "Duration (hours)", placeholder: "1:30, 1.5, or 1:30:15", text: $draft.duration)

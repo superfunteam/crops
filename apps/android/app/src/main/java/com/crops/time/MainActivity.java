@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -42,17 +43,18 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private static final int BG = 0xFFF6F5EF, GREEN = 0xFF285A43, INK = 0xFF213A30, MUTED = 0xFF727B71, LINE = 0xFFE0E4DA, LIME = 0xFFDCEEA5;
     private Repository repo;
     private LinearLayout root, page, body, entries;
-    private TextView syncStatus, timerClock, totalClock, loginError;
+    private TextView syncStatus, timerClock, totalClock, loginError, timerError;
     private EditText serverInput, usernameInput, passwordInput, nameInput, teamInput, taskInput, notesInput;
-    private Button submit, startStop;
+    private Button submit, startStop, timerSubmit;
     private Spinner projectSpinner;
     private CheckBox billableInput;
     private final List<JSONObject> projectOptions = new ArrayList<>();
+    private final List<JSONObject> timerProjectOptions = new ArrayList<>();
     private String projectId = "", draftTask = "", draftNotes = "", screenSignature = "";
-    private boolean billable = true, register, resumed, loginView;
+    private boolean billable = true, register, resumed, loginView, composingTimer;
     private int tab;
     /** The currently open entry dialog, if any; package-visible for the instrumentation suite. */
-    AlertDialog entryDialog, confirmDialog;
+    AlertDialog entryDialog, confirmDialog, timerDialog;
     private LocalDate date = LocalDate.now();
     private final Handler handler = new Handler();
     private final Runnable tick = new Runnable() {
@@ -67,6 +69,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
             tab = savedInstanceState.getInt("tab"); projectId = savedInstanceState.getString("projectId", "");
             draftTask = savedInstanceState.getString("task", ""); draftNotes = savedInstanceState.getString("notes", "");
             billable = savedInstanceState.getBoolean("billable", true); date = LocalDate.parse(savedInstanceState.getString("date", LocalDate.now().toString()));
+            composingTimer = savedInstanceState.getBoolean("composingTimer");
         }
         repo.addListener(this); render();
     }
@@ -76,19 +79,24 @@ public final class MainActivity extends Activity implements Repository.Listener 
         repo.removeListener(this);
         if (confirmDialog != null) confirmDialog.dismiss();
         if (entryDialog != null) entryDialog.dismiss();
+        if (timerDialog != null) timerDialog.dismiss();
         super.onDestroy();
     }
     @Override protected void onSaveInstanceState(Bundle saved) {
         captureDraft(); saved.putInt("tab", tab); saved.putString("projectId", projectId); saved.putString("task", draftTask); saved.putString("notes", draftNotes);
-        saved.putBoolean("billable", billable); saved.putString("date", date.toString()); super.onSaveInstanceState(saved);
+        saved.putBoolean("billable", billable); saved.putBoolean("composingTimer", composingTimer); saved.putString("date", date.toString()); super.onSaveInstanceState(saved);
     }
     @Override public void changed() {
+        if (timerDialog != null && (repo.running() != null || !repo.signedIn())) timerDialog.dismiss();
         if (loginView != !repo.signedIn() || (!loginView && !signature().equals(screenSignature))) {
             captureDraft(); render();
         }
         if (loginError != null && loginView) loginError.setText(repo.error);
         if (submit != null && loginView) { submit.setEnabled(!repo.busy); submit.setText(repo.busy ? "Connecting…" : register ? "Create your workspace" : "Sign in"); }
         if (startStop != null && !loginView) startStop.setEnabled(!repo.busy && (repo.running() != null || !projectOptions.isEmpty()));
+        if (timerSubmit != null) { timerSubmit.setEnabled(!repo.busy && !projectOptions.isEmpty()); timerSubmit.setText(repo.busy ? "Starting…" : "Start timer"); }
+        if (timerDialog != null) { timerDialog.setCancelable(!repo.busy); timerDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!repo.busy); }
+        if (timerError != null) timerError.setText(repo.error);
         updateClocks(); ensureService();
     }
     private String signature() {
@@ -99,11 +107,12 @@ public final class MainActivity extends Activity implements Repository.Listener 
         if (taskInput != null) draftTask = taskInput.getText().toString();
         if (notesInput != null) draftNotes = notesInput.getText().toString();
         if (billableInput != null) billable = billableInput.isChecked();
-        if (projectSpinner != null && projectSpinner.getSelectedItemPosition() >= 0 && projectSpinner.getSelectedItemPosition() < projectOptions.size())
-            projectId = projectOptions.get(projectSpinner.getSelectedItemPosition()).optString("id");
+        if (projectSpinner != null && projectSpinner.getSelectedItemPosition() >= 0 && projectSpinner.getSelectedItemPosition() < timerProjectOptions.size())
+            projectId = timerProjectOptions.get(projectSpinner.getSelectedItemPosition()).optString("id");
     }
     private void render() {
-        taskInput = null; notesInput = null; projectSpinner = null; billableInput = null; timerClock = null; totalClock = null; startStop = null; loginError = null; submit = null; entries = null;
+        if (timerDialog == null) { taskInput = null; notesInput = null; projectSpinner = null; billableInput = null; }
+        timerClock = null; totalClock = null; startStop = null; loginError = null; submit = null; entries = null;
         loginView = !repo.signedIn(); screenSignature = signature();
         root = column(); root.setBackgroundColor(BG); root.setPadding(dp(22), dp(20), dp(22), dp(12));
         root.setOnApplyWindowInsetsListener((v, insets) -> {
@@ -116,10 +125,11 @@ public final class MainActivity extends Activity implements Repository.Listener 
         header();
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        page = column(); page.setPadding(0, dp(22), 0, dp(20)); scroll.addView(page);
+        page = column(); page.setPadding(0, dp(14), 0, dp(12)); scroll.addView(page);
         if (repo.state == null) { page.addView(text("Getting your workspace…", 25, INK, true)); page.addView(text("Your time will be here in a moment.", 15, MUTED, false)); }
         else if (tab == 0) timerPage(); else if (tab == 1) timesheetPage(); else settingsPage();
         navigation(); updateClocks();
+        if (composingTimer && repo.state != null && repo.running() == null && timerDialog == null) newTimerDialog();
     }
     private void header() {
         LinearLayout row = row(); row.setGravity(Gravity.CENTER_VERTICAL);
@@ -128,7 +138,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         JSONObject user = repo.state == null ? null : repo.state.optJSONObject("user");
         TextView avatar = text(user == null ? "C" : user.optString("name", "C").substring(0, 1).toUpperCase(Locale.US), 15, GREEN, true);
         avatar.setGravity(Gravity.CENTER); avatar.setBackground(shape(0xFFE6ECDC, 30, 0)); row.addView(avatar, new LinearLayout.LayoutParams(dp(36), dp(36))); root.addView(row);
-        syncStatus = text("Connecting…", 12, MUTED, false); syncStatus.setPadding(0, dp(12), 0, 0); syncStatus.setOnClickListener(v -> repo.refresh()); root.addView(syncStatus);
+        syncStatus = text("Connecting…", 12, MUTED, false); syncStatus.setPadding(0, dp(8), 0, 0); syncStatus.setOnClickListener(v -> repo.refresh()); root.addView(syncStatus);
     }
     private void login() {
         ScrollView scroll = new ScrollView(this); root.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
@@ -168,48 +178,40 @@ public final class MainActivity extends Activity implements Repository.Listener 
     }
     private void timerPage() {
         teamPicker(page);
-        margin(page, text("Time well spent.", 31, INK, true), 12);
-        margin(page, text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMMM d")), 14, MUTED, false), 7);
+        margin(page, text("Your day", 27, INK, true), 8);
+        margin(page, text(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMMM d")), 13, MUTED, false), 4);
         JSONObject running = repo.running();
-        LinearLayout timerCard = card(running == null ? 0xFFEAF0DF : GREEN); margin(page, timerCard, 26);
-        TextView eyebrow = text(running == null ? "READY WHEN YOU ARE" : "●  GROWING YOUR DAY", 11, running == null ? GREEN : LIME, true); timerCard.addView(eyebrow);
-        timerClock = text(running == null ? "00:00:00" : Repository.clock(repo.duration(running)), 44, running == null ? GREEN : Color.WHITE, false);
-        timerClock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL)); margin(timerCard, timerClock, 8);
         if (running != null) {
-            margin(timerCard, text(repo.projectName(running.optString("projectId")), 19, Color.WHITE, true), 8);
-            if (!running.optString("task").isEmpty()) margin(timerCard, text(running.optString("task"), 14, 0xFFD8E4D6, false), 6);
-            startStop = button("■  Stop timer", LIME, INK); startStop.setOnClickListener(v -> repo.stop(running.optString("id"), running.optInt("version"))); margin(timerCard, startStop, 22);
+            LinearLayout timerCard = card(GREEN); margin(page, timerCard, 16);
+            timerCard.addView(text("●  TRACKING", 11, LIME, true));
+            timerClock = text(Repository.clock(repo.duration(running)), 36, Color.WHITE, false);
+            timerClock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL)); margin(timerCard, timerClock, 4);
+            margin(timerCard, text(repo.projectName(running.optString("projectId")), 18, Color.WHITE, true), 6);
+            if (!running.optString("task").isEmpty()) margin(timerCard, text(running.optString("task"), 13, 0xFFD8E4D6, false), 4);
+            startStop = button("■  Stop timer", LIME, INK); startStop.setOnClickListener(v -> repo.stop(running.optString("id"), running.optInt("version"))); margin(timerCard, startStop, 12);
         } else {
-            margin(timerCard, text("Choose a project. Find your flow.", 14, GREEN, false), 6);
             populateProjectOptions();
-            if (projectOptions.isEmpty()) margin(timerCard, text("Add your first project in the web workspace, then tap the sync status above.", 15, GREEN, false), 20);
-            else {
-                projectSpinner = projectPicker(timerCard, projectOptions, projectId);
-                taskInput = field(timerCard, "Task", "What are you working on?", draftTask, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-                notesInput = field(timerCard, "Notes", "A little context (optional)", draftNotes, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-                billableInput = check("Billable time", billable); margin(timerCard, billableInput, 7);
-            }
-            startStop = button("▶  Start timer", GREEN, Color.WHITE); startStop.setEnabled(!projectOptions.isEmpty());
-            startStop.setOnClickListener(v -> { captureDraft(); requestNotifications(); repo.start(projectId, draftTask.trim().isEmpty() ? "General" : draftTask, draftNotes, billable, null); }); margin(timerCard, startStop, 16);
+            startStop = button("＋  Start timer", GREEN, Color.WHITE); startStop.setEnabled(!repo.busy && !projectOptions.isEmpty());
+            startStop.setOnClickListener(v -> newTimerDialog()); margin(page, startStop, 16);
+            if (projectOptions.isEmpty()) margin(page, text("Add a project in your web workspace to start tracking.", 13, MUTED, false), 8);
         }
-        LinearLayout day = row(); day.setGravity(Gravity.CENTER_VERTICAL); margin(page, day, 27);
-        day.addView(text("Today", 21, INK, true), new LinearLayout.LayoutParams(0, -2, 1)); totalClock = text("0h 00m", 20, GREEN, true); day.addView(totalClock);
-        entries = column(); margin(page, entries, 12); fillEntries(LocalDate.now(), 5);
-        Button add = button("+  Add time manually", BG, GREEN); add.setOnClickListener(v -> manualDialog()); margin(page, add, 12);
+        LinearLayout day = row(); day.setGravity(Gravity.CENTER_VERTICAL); margin(page, day, 20);
+        day.addView(text("Today", 20, INK, true), new LinearLayout.LayoutParams(0, -2, 1)); totalClock = text("0h 00m", 18, GREEN, true); day.addView(totalClock);
+        entries = column(); margin(page, entries, 8); fillEntries(LocalDate.now(), 5);
+        Button add = button("+  Add time manually", BG, GREEN); add.setOnClickListener(v -> manualDialog()); margin(page, add, 6);
     }
     private void timesheetPage() {
-        teamPicker(page); margin(page, text("Your timesheet", 31, INK, true), 12);
-        margin(page, text("A clear view of where your time grows.", 14, MUTED, false), 8);
-        LinearLayout dates = row(); dates.setGravity(Gravity.CENTER_VERTICAL); margin(page, dates, 24);
-        Button previous = button("‹", Color.WHITE, GREEN); dates.addView(previous, new LinearLayout.LayoutParams(dp(45), dp(46)));
+        teamPicker(page); margin(page, text("Timesheet", 27, INK, true), 8);
+        LinearLayout dates = row(); dates.setGravity(Gravity.CENTER_VERTICAL); margin(page, dates, 12);
+        Button previous = button("‹", Color.WHITE, GREEN); previous.setContentDescription("Previous day"); dates.addView(previous, new LinearLayout.LayoutParams(dp(48), dp(48)));
         Button current = button(date.equals(LocalDate.now()) ? "Today, " + date.format(DateTimeFormatter.ofPattern("MMM d")) : date.format(DateTimeFormatter.ofPattern("EEE, MMM d")), BG, INK);
-        dates.addView(current, new LinearLayout.LayoutParams(0, dp(46), 1));
-        Button next = button("›", Color.WHITE, GREEN); next.setEnabled(date.isBefore(LocalDate.now())); dates.addView(next, new LinearLayout.LayoutParams(dp(45), dp(46)));
+        current.setContentDescription("Choose date, " + date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d"))); dates.addView(current, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button next = button("›", Color.WHITE, GREEN); next.setContentDescription("Next day"); next.setEnabled(date.isBefore(LocalDate.now())); dates.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
         previous.setOnClickListener(v -> { date = date.minusDays(1); render(); }); next.setOnClickListener(v -> { date = date.plusDays(1); render(); });
         current.setOnClickListener(v -> new DatePickerDialog(this, (picker, year, month, day) -> { date = LocalDate.of(year, month+1, day); render(); }, date.getYear(), date.getMonthValue()-1, date.getDayOfMonth()).show());
-        LinearLayout total = card(0xFFEAF0DF); margin(page, total, 20); total.addView(text("TOTAL TIME", 11, GREEN, true)); totalClock = text("0h 00m", 38, GREEN, false); margin(total, totalClock, 8);
-        entries = column(); margin(page, entries, 20); fillEntries(date, 1000);
-        Button add = button("+  Add time", GREEN, Color.WHITE); add.setOnClickListener(v -> manualDialog()); margin(page, add, 16);
+        LinearLayout total = row(); total.setGravity(Gravity.CENTER_VERTICAL); margin(page, total, 12); total.addView(text("Total time", 16, MUTED, false), new LinearLayout.LayoutParams(0, -2, 1)); totalClock = text("0h 00m", 20, GREEN, true); total.addView(totalClock);
+        entries = column(); margin(page, entries, 8); fillEntries(date, 1000);
+        Button add = button("+  Add time", GREEN, Color.WHITE); add.setOnClickListener(v -> manualDialog()); margin(page, add, 10);
         margin(page, text("Invoice and paid statuses are managed by your team in the web workspace.", 12, MUTED, false), 18);
     }
     private void settingsPage() {
@@ -226,7 +228,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         Button notifications = button("Notification settings", BG, GREEN); notifications.setOnClickListener(v -> startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()))); margin(page, notifications, 12);
         Button syncNow = button("Sync now", BG, GREEN); syncNow.setOnClickListener(v -> repo.refresh()); margin(page, syncNow, 4);
         Button signOut = button("Sign out", Color.WHITE, 0xFFA23831); signOut.setOnClickListener(v -> { if (repo.running() != null) Toast.makeText(this, "Your timer continues in your workspace.", Toast.LENGTH_LONG).show(); stopService(new Intent(this, TimerService.class)); repo.logout(); }); margin(page, signOut, 22);
-        margin(page, text("CROPS  1.1.0\nNative, simple, and made for your team.", 12, MUTED, false), 30);
+        margin(page, text("CROPS  1.2.0\nNative, simple, and made for your team.", 12, MUTED, false), 24);
     }
     private void fillEntries(LocalDate target, int limit) {
         JSONArray all = repo.array("entries"); int count = 0;
@@ -236,7 +238,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
             if (entry == null || !target.toString().equals(entry.optString("date")) || !userId.equals(entry.optString("userId"))) continue;
             if (++count > limit) continue;
             LinearLayout card = card(Color.WHITE); margin(entries, card, 8);
-            boolean isRunning = running(entry);
+            boolean isRunning = running(entry), agentOnly = Repository.agentOnly(entry);
             String status = entry.optString("status", "unbilled");
             boolean locked = !"unbilled".equals(status);
             String project = repo.projectName(entry.optString("projectId")), task = entry.optString("task", "General").isEmpty() ? "General" : entry.optString("task", "General");
@@ -245,32 +247,32 @@ public final class MainActivity extends Activity implements Repository.Listener 
             // The whole card opens the entry; the explicit Edit/View button below is the labelled, 48dp target.
             card.setClickable(true); card.setFocusable(true); card.setOnClickListener(v -> editDialog(entry));
             card.setForeground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), null, shape(Color.WHITE, 20, 0)));
-            card.setContentDescription(project + ", " + task + ", " + spoken(repo.duration(entry)) + ", " + label.replace("●", "").replace("✓", "").trim()
+            card.setContentDescription(project + ", " + task + (agentOnly ? "" : ", " + spoken(repo.duration(entry))) + ", " + label.replace("●", "").replace("✓", "").trim()
                 + (agent.isEmpty() ? "" : ", agent usage " + agent) + (locked ? ". Opens read-only details" : ". Opens editor"));
             LinearLayout row = row(); row.setGravity(Gravity.CENTER_VERTICAL); card.addView(row);
             LinearLayout details = column(); row.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
             details.addView(text(project, 16, INK, true));
-            margin(details, text(task, 13, MUTED, false), 5);
-            TextView duration = text(Repository.clock(repo.duration(entry)), 16, GREEN, true); duration.setTag(entry); row.addView(duration);
+            TextView taskTitle = text(task.replaceFirst("(?i)^Agent usage:\\s*", ""), 13, MUTED, false); taskTitle.setMaxLines(2); taskTitle.setEllipsize(TextUtils.TruncateAt.END); margin(details, taskTitle, 4);
+            if (!agentOnly) { TextView duration = text(Repository.clock(repo.duration(entry)), 16, GREEN, true); duration.setTag(entry); row.addView(duration); }
             if (!agent.isEmpty()) {
-                TextView usage = text(agent, 11, GREEN, true); usage.setBackground(shape(0xFFEAF0DF, 8, 0)); usage.setPadding(dp(8), dp(3), dp(8), dp(3));
+                TextView usage = text("Agent Usage: " + agent, 12, GREEN, true); usage.setBackground(shape(0xFFEAF0DF, 8, 0)); usage.setPadding(dp(8), dp(3), dp(8), dp(3));
                 String model = Repository.agentModel(entry); usage.setContentDescription("Agent usage " + agent + (model.isEmpty() ? "" : ", model " + model));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.topMargin = dp(7); details.addView(usage, lp);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.topMargin = dp(6); details.addView(usage, lp);
             }
-            LinearLayout footer = row(); footer.setGravity(Gravity.CENTER_VERTICAL); margin(card, footer, 9);
+            LinearLayout footer = row(); footer.setGravity(Gravity.CENTER_VERTICAL); margin(card, footer, 4);
             footer.addView(text(label, 11, MUTED, false), new LinearLayout.LayoutParams(0, -2, 1));
-            if (!isRunning && !locked) {
+            if (!isRunning && !locked && !agentOnly) {
                 Button resume = button("▶ Resume", Color.WHITE, GREEN); resume.setTextSize(12); resume.setContentDescription("Resume " + task + " on " + project); footer.addView(resume, new LinearLayout.LayoutParams(-2, dp(48)));
                 resume.setEnabled(!repo.busy); resume.setOnClickListener(v -> { requestNotifications(); repo.start(entry.optString("projectId"), entry.optString("task", "General"), entry.optString("notes"), entry.optBoolean("billable"), entry.optString("id")); });
             }
             Button edit = button(locked ? "View" : "✎ Edit", Color.WHITE, GREEN); edit.setTextSize(12); edit.setMinWidth(dp(64));
             edit.setContentDescription((locked ? "View " : "Edit ") + task + " on " + project); edit.setOnClickListener(v -> editDialog(entry));
             footer.addView(edit, new LinearLayout.LayoutParams(-2, dp(48)));
-            if (!entry.optString("notes").isEmpty()) margin(card, text(entry.optString("notes"), 12, MUTED, false), 5);
+            if (!entry.optString("notes").isEmpty()) { TextView notes = text(entry.optString("notes"), 12, MUTED, false); notes.setMaxLines(2); notes.setEllipsize(TextUtils.TruncateAt.END); margin(card, notes, 4); }
         }
         if (count == 0) {
             LinearLayout empty = card(Color.WHITE); entries.addView(empty);
-            empty.addView(text("Room to grow", 18, INK, true)); margin(empty, text("No time logged for this day yet.", 14, MUTED, false), 8);
+            empty.addView(text("Nothing logged yet", 17, INK, true)); margin(empty, text("Start a timer or add time manually.", 13, MUTED, false), 6);
         } else if (count > limit) margin(entries, text("See all " + count + " entries in your timesheet.", 13, MUTED, false), 12);
     }
     private void updateClocks() {
@@ -298,11 +300,40 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private void navigation() {
         LinearLayout nav = row(); nav.setPadding(dp(5), dp(5), dp(5), dp(5)); nav.setBackground(shape(0xFFE9ECE3, 24, 0)); root.addView(nav);
         String[] labels = { "◷  Timer", "▤  Timesheet", "⚙  Settings" };
-        for (int i = 0; i < labels.length; i++) { int selected = i; Button button = button(labels[i], tab == i ? Color.WHITE : 0xFFE9ECE3, tab == i ? GREEN : MUTED); button.setTextSize(12); nav.addView(button, new LinearLayout.LayoutParams(0, dp(46), 1)); button.setOnClickListener(v -> { captureDraft(); tab = selected; render(); }); }
+        for (int i = 0; i < labels.length; i++) { int selected = i; Button button = button(labels[i], tab == i ? Color.WHITE : 0xFFE9ECE3, tab == i ? GREEN : MUTED); button.setTextSize(12); nav.addView(button, new LinearLayout.LayoutParams(0, dp(48), 1)); button.setOnClickListener(v -> { captureDraft(); tab = selected; render(); }); }
     }
     private void populateProjectOptions() {
         projectOptions.clear(); JSONArray projects = repo.array("projects");
         for (int i = 0; i < projects.length(); i++) { JSONObject project = projects.optJSONObject(i); if (project != null && !project.optBoolean("archived")) projectOptions.add(project); }
+    }
+    private void newTimerDialog() {
+        if (timerDialog != null || repo.running() != null || !repo.signedIn()) return;
+        populateProjectOptions();
+        if (projectOptions.isEmpty()) { composingTimer = false; Toast.makeText(this, "Add a project in your web workspace first.", Toast.LENGTH_LONG).show(); return; }
+        timerProjectOptions.clear(); timerProjectOptions.addAll(projectOptions); composingTimer = true;
+        LinearLayout content = column(); content.setPadding(dp(24), dp(4), dp(24), dp(8));
+        projectSpinner = projectPicker(content, timerProjectOptions, projectId);
+        taskInput = field(content, "Task", "What are you working on?", draftTask, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        notesInput = field(content, "Notes", "Optional context", draftNotes, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        billableInput = check("Billable time", billable); billableInput.setMinHeight(dp(48)); margin(content, billableInput, 4);
+        timerError = text(repo.error, 13, 0xFFA23831, false); timerError.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); margin(content, timerError, 4);
+        ScrollView scroll = new ScrollView(this); scroll.addView(content);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("What are you working on?").setView(scroll).setNegativeButton("Cancel", null).setPositiveButton("Start timer", null).create();
+        timerDialog = dialog;
+        dialog.setOnDismissListener(d -> {
+            captureDraft(); composingTimer = false;
+            if (timerDialog == dialog) { timerDialog = null; timerSubmit = null; timerError = null; taskInput = null; notesInput = null; projectSpinner = null; billableInput = null; }
+        });
+        dialog.setOnShowListener(d -> {
+            timerSubmit = dialog.getButton(AlertDialog.BUTTON_POSITIVE); timerSubmit.setEnabled(!repo.busy);
+            dialog.setCancelable(!repo.busy); dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!repo.busy);
+            timerSubmit.setOnClickListener(v -> {
+                if (repo.busy) return;
+                captureDraft(); requestNotifications();
+                repo.start(projectId, draftTask.trim().isEmpty() ? "General" : draftTask, draftNotes, billable, null);
+            });
+        });
+        dialog.show();
     }
     private void manualDialog() {
         populateProjectOptions();
@@ -343,7 +374,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
     private void editDialog(JSONObject entry) {
         if (entryDialog != null && entryDialog.isShowing()) return;
         final String entryId = entry.optString("id"); final int version = entry.optInt("version");
-        final boolean isRunning = running(entry);
+        final boolean isRunning = running(entry), agentOnly = Repository.agentOnly(entry);
         final String status = entry.optString("status", "unbilled");
         final boolean locked = !"unbilled".equals(status);
         final String originalProject = entry.optString("projectId"), originalTask = entry.optString("task").trim(), originalNotes = entry.optString("notes").trim();
@@ -359,11 +390,12 @@ public final class MainActivity extends Activity implements Repository.Listener 
         } catch (Exception ignored) {}
 
         LinearLayout content = column(); content.setPadding(dp(24), dp(10), dp(24), dp(5));
-        if (locked) notice(content, ("paid".equals(status) ? "This time is marked paid" : "This time is invoiced") + ", so it is locked. A team admin can mark it unbilled in the web workspace before it can be changed or deleted.");
+        if (locked) notice(content, ("paid".equals(status) ? "This entry is marked paid" : "This entry is invoiced") + ", so it is locked. A team admin can mark it unbilled in the web workspace before it can be changed or deleted.");
         else if (isRunning) notice(content, "This timer is running. Stop it to change its date or duration. Project, task, notes, and billable can change now.");
+        else if (agentOnly) notice(content, "This is an agent usage entry. Token count and subscription cost can be edited in the web workspace.");
         Spinner project = projectPicker(content, projects, originalProject);
         EditText task = field(content, "Task", "What did you work on?", entry.optString("task"), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        EditText duration = field(content, "Duration (hours:minutes)", "1:30", isRunning ? hoursMinutes(repo.duration(entry)) : originalDuration, InputType.TYPE_CLASS_DATETIME | InputType.TYPE_DATETIME_VARIATION_TIME);
+        EditText duration = agentOnly ? null : field(content, "Duration (hours:minutes)", "1:30", isRunning ? hoursMinutes(repo.duration(entry)) : originalDuration, InputType.TYPE_CLASS_DATETIME | InputType.TYPE_DATETIME_VARIATION_TIME);
         final LocalDate[] selectedDate = { originalDate };
         Button dateButton = button(originalDate.format(DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")), BG, GREEN); margin(content, dateButton, 12);
         dateButton.setContentDescription("Date, " + originalDate.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")));
@@ -377,10 +409,10 @@ public final class MainActivity extends Activity implements Repository.Listener 
         String agent = Repository.agentLabel(entry);
         if (!agent.isEmpty()) { String model = Repository.agentModel(entry); margin(content, text("Agent usage: " + agent + (model.isEmpty() ? "" : " · " + model), 12, MUTED, false), 8); }
         TextView failure = text("", 13, 0xFFA23831, false); failure.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); margin(content, failure, 8);
-        if (locked) for (View v : new View[]{ project, task, duration, dateButton, notes, billableBox }) disable(v);
+        if (locked) for (View v : new View[]{ project, task, duration, dateButton, notes, billableBox }) if (v != null) disable(v);
         ScrollView scroll = new ScrollView(this); scroll.addView(content);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle(locked ? "Time entry" : "Edit time").setView(scroll);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle(locked ? "Entry details" : agentOnly ? "Edit agent usage" : "Edit time").setView(scroll);
         if (locked) builder.setPositiveButton("Close", null);
         else {
             builder.setNegativeButton("Cancel", null).setPositiveButton("Save changes", null);
@@ -414,7 +446,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
                     if (billableBox.isChecked() != entry.optBoolean("billable")) changes.put("billable", billableBox.isChecked());
                     if (!isRunning) {
                         if (!selectedDate[0].equals(originalDate)) changes.put("date", selectedDate[0].toString());
-                        String durationValue = duration.getText().toString().trim();
+                        String durationValue = duration == null ? originalDuration : duration.getText().toString().trim();
                         // An untouched field is never re-sent, so seconds below the displayed minute are preserved.
                         if (!durationValue.equals(originalDuration)) {
                             try { changes.put("durationSeconds", parseDuration(durationValue)); }
@@ -427,8 +459,8 @@ public final class MainActivity extends Activity implements Repository.Listener 
                 repo.edit(entryId, version, changes, finish);
             });
             if (delete != null) delete.setOnClickListener(v -> {
-                String summary = repo.projectName(originalProject) + " · " + (originalTask.isEmpty() ? "General" : originalTask) + " · " + originalDuration + " on " + originalDate.format(DateTimeFormatter.ofPattern("MMM d, yyyy"));
-                confirmDialog = new AlertDialog.Builder(this).setTitle("Delete this time?").setMessage(summary + "\n\nThis permanently removes the entry for everyone on your team.")
+                String summary = repo.projectName(originalProject) + " · " + (originalTask.isEmpty() ? "General" : originalTask) + " · " + (agentOnly ? Repository.agentLabel(entry) : originalDuration) + " on " + originalDate.format(DateTimeFormatter.ofPattern("MMM d, yyyy"));
+                confirmDialog = new AlertDialog.Builder(this).setTitle("Delete this entry?").setMessage(summary + "\n\nThis permanently removes the entry for everyone on your team.")
                     .setNegativeButton("Keep", null).setPositiveButton("Delete", (c, which) -> {
                         if (repo.busy) { show(failure, "Finishing your previous change. Try again in a moment."); return; }
                         show(failure, ""); save.setEnabled(false); delete.setEnabled(false); show(delete, "Deleting…");
@@ -459,7 +491,7 @@ public final class MainActivity extends Activity implements Repository.Listener 
         }
     }
     private Spinner projectPicker(LinearLayout parent, List<JSONObject> projects, String selectedId) {
-        margin(parent, text("Project", 12, MUTED, true), 18); List<String> labels = new ArrayList<>(); int selection = 0;
+        margin(parent, text("Project", 12, MUTED, true), 12); List<String> labels = new ArrayList<>(); int selection = 0;
         for (int i = 0; i < projects.size(); i++) { JSONObject p = projects.get(i); labels.add(p.optString("name")); if (p.optString("id").equals(selectedId)) selection = i; }
         Spinner spinner = spinner(labels); spinner.setSelection(selection); margin(parent, spinner, 6); return spinner;
     }
@@ -469,15 +501,17 @@ public final class MainActivity extends Activity implements Repository.Listener 
         spinner.setAdapter(adapter); spinner.setBackgroundTintList(ColorStateList.valueOf(GREEN)); spinner.setMinimumHeight(dp(48)); return spinner;
     }
     private EditText field(LinearLayout parent, String label, String hint, String value, int input) {
-        margin(parent, text(label, 12, MUTED, true), 16); EditText field = new EditText(this); field.setSingleLine(true); field.setTextSize(16); field.setTextColor(INK);
-        field.setHintTextColor(0xFF979F95); field.setHint(hint); field.setText(value); field.setInputType(input); field.setSelectAllOnFocus(false);
+        boolean multiline = "Notes".equals(label);
+        margin(parent, text(label, 12, MUTED, true), 12); EditText field = new EditText(this); field.setTextSize(16); field.setTextColor(INK);
+        field.setHintTextColor(0xFF979F95); field.setHint(hint); field.setText(value); field.setInputType(multiline ? input | InputType.TYPE_TEXT_FLAG_MULTI_LINE : input); field.setSingleLine(!multiline); field.setSelectAllOnFocus(false);
+        if (multiline) { field.setMinLines(2); field.setMaxLines(4); field.setGravity(Gravity.TOP | Gravity.START); }
         field.setPadding(dp(12), dp(10), dp(12), dp(10)); field.setBackground(shape(0xFFFAFBF7, 10, LINE));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(49)); lp.topMargin = dp(7); parent.addView(field, lp); return field;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, multiline ? -2 : dp(48)); lp.topMargin = dp(6); parent.addView(field, lp); return field;
     }
     private CheckBox check(String label, boolean checked) { CheckBox box = new CheckBox(this); box.setText(label); box.setTextColor(INK); box.setTextSize(13); box.setChecked(checked); box.setButtonTintList(ColorStateList.valueOf(GREEN)); return box; }
     private LinearLayout column() { LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL); return layout; }
     private LinearLayout row() { LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.HORIZONTAL); return layout; }
-    private LinearLayout card(int color) { LinearLayout layout = column(); layout.setPadding(dp(20), dp(20), dp(20), dp(18)); layout.setBackground(shape(color, 20, color == Color.WHITE ? LINE : 0)); return layout; }
+    private LinearLayout card(int color) { LinearLayout layout = column(); layout.setPadding(dp(16), dp(14), dp(16), dp(12)); layout.setBackground(shape(color, 16, color == Color.WHITE ? LINE : 0)); return layout; }
     private TextView text(String value, int size, int color, boolean bold) { TextView text = new TextView(this); text.setText(value); text.setTextSize(size); text.setTextColor(color); text.setLineSpacing(dp(2), 1); text.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL)); return text; }
     private Button button(String label, int background, int color) { Button button = new Button(this); button.setText(label); button.setTextSize(15); button.setAllCaps(false); button.setTextColor(color); button.setTypeface(Typeface.DEFAULT, Typeface.BOLD); button.setMinHeight(dp(48)); button.setMinimumHeight(dp(48)); button.setPadding(dp(12), dp(4), dp(12), dp(4)); button.setStateListAnimator(null); button.setBackground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x22285A43), shape(background, 14, 0), null)); return button; }
     private GradientDrawable shape(int color, int radius, int stroke) { GradientDrawable drawable = new GradientDrawable(); drawable.setColor(color); drawable.setCornerRadius(dp(radius)); if (stroke != 0) drawable.setStroke(dp(1), stroke); return drawable; }

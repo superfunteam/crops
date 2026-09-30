@@ -44,12 +44,34 @@ public final class CropsInstrumentation extends Instrumentation {
             require(!ciphertext.isEmpty() && !ciphertext.contains(token), "Session is encrypted on disk");
             Activity activity = startActivitySync(new Intent(getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
+            MainActivity main = (MainActivity) activity;
+            final java.util.List<android.widget.EditText> composerFields = new java.util.ArrayList<>();
+            runOnMainSync(() -> collect(activity.getWindow().getDecorView(), composerFields));
+            require(composerFields.isEmpty() && main.timerDialog == null, "Idle overview has no timer form");
             runOnMainSync(() -> {
                 Button start = findButton(activity.getWindow().getDecorView(), "Start timer");
                 if (start == null) throw new AssertionError("Native Start timer button missing");
                 start.performClick();
             });
+            waitForIdleSync();
+            runOnMainSync(() -> collect(main.timerDialog.getWindow().getDecorView(), composerFields));
+            require(main.timerDialog.isShowing() && composerFields.size() == 2 && repo.running() == null, "Start action opens the native form without starting a timer");
+            runOnMainSync(() -> {
+                composerFields.get(0).setText("Native timer draft");
+                composerFields.get(1).setText("Draft context\nSecond line");
+                main.timerDialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).performClick();
+            });
+            waitForIdleSync();
+            require(main.timerDialog == null && repo.running() == null, "Cancel returns to the compact overview");
+            composerFields.clear();
+            runOnMainSync(() -> {
+                findButton(activity.getWindow().getDecorView(), "Start timer").performClick();
+                collect(main.timerDialog.getWindow().getDecorView(), composerFields);
+            });
+            require(composerFields.get(0).getText().toString().equals("Native timer draft") && composerFields.get(1).getText().toString().equals("Draft context\nSecond line"), "Reopening preserves the project/task/notes draft");
+            runOnMainSync(() -> main.timerDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
             await(() -> !repo.busy && repo.running() != null, 20000, "Start timer through native button");
+            await(() -> main.timerDialog == null, 5000, "Confirmed Start closes the composer");
             String firstId = repo.running().getString("id");
             await(() -> TimerService.active, 5000, "Foreground timer service starts");
             NotificationManager manager = getTargetContext().getSystemService(NotificationManager.class);
@@ -157,8 +179,9 @@ public final class CropsInstrumentation extends Instrumentation {
         await(() -> entry(id) != null && entry(id).optJSONObject("agent") != null, 20000, "Agent usage arrives in state");
         waitForIdleSync(); Thread.sleep(300);
         final boolean[] shown = { false };
-        runOnMainSync(() -> shown[0] = findText(activity.getWindow().getDecorView(), "2.41M tokens · $31.40"));
-        require(shown[0], "Entry card shows 2.41M tokens · $31.40");
+        runOnMainSync(() -> shown[0] = findText(activity.getWindow().getDecorView(), "Agent Usage: 2.41M tokens · $31.40"));
+        require(shown[0], "Entry card shows Agent Usage: 2.41M tokens · $31.40");
+        agentOnlyChecks(activity, server, token, projectId);
 
         // Native Delete with confirmation removes a second stopped entry.
         runOnMainSync(() -> repo.manual(projectId, "Delete me", "", java.time.LocalDate.now().toString(), 600, false));
@@ -173,6 +196,31 @@ public final class CropsInstrumentation extends Instrumentation {
         runOnMainSync(() -> main.confirmDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
         await(() -> !repo.busy && entry(doomed) == null && main.entryDialog == null, 20000, "Confirmed native Delete removes the entry");
         waitForIdleSync();
+    }
+    private void agentOnlyChecks(Activity activity, String server, String token, String projectId) throws Exception {
+        MainActivity main = (MainActivity) activity;
+        require(Repository.agentOnly(new JSONObject("{\"agent\":{\"tokens\":100},\"durationSeconds\":0,\"startedAt\":null}"))
+            && !Repository.agentOnly(new JSONObject("{\"agent\":{\"tokens\":100},\"durationSeconds\":60,\"startedAt\":null}"))
+            && !Repository.agentOnly(new JSONObject("{\"agent\":{\"tokens\":100},\"durationSeconds\":0,\"startedAt\":\"2026-09-30T12:00:00Z\"}")), "Only stopped zero-time agent reports use token-entry presentation");
+        JSONObject report = post(server + "/api/entries", token, new JSONObject().put("teamId", repo.teamId()).put("projectId", projectId)
+            .put("task", "Agent usage: Token fixture").put("notes", "Longer context\nUsage breakdown and allocation details").put("date", LocalDate.now().toString()).put("durationSeconds", 0).put("billable", true)
+            .put("agent", new JSONObject().put("tokens", 76203292).put("cost", 1.66).put("model", "claude-opus-5-5 (Anthropic)")));
+        String id = report.getJSONObject("entry").getString("id");
+        runOnMainSync(() -> repo.refresh());
+        await(() -> entry(id) != null, 20000, "Zero-time token report arrives alongside time entries");
+        waitForIdleSync();
+        final View[] card = { null };
+        runOnMainSync(() -> { View edit = findDescribed(activity.getWindow().getDecorView(), "Edit Agent usage: Token fixture"); if (edit == null) throw new AssertionError("Token report Edit missing"); card[0] = (View) edit.getParent().getParent(); });
+        require(findText(card[0], "Agent Usage: 76.2M tokens · $1.66") && !findText(card[0], "00:00:00") && findButton(card[0], "Resume") == null, "Token report shows tokens/cost with no zero clock or Resume");
+        runOnMainSync(() -> findDescribed(card[0], "Edit Agent usage: Token fixture").performClick());
+        waitForIdleSync();
+        final java.util.List<android.widget.EditText> fields = new java.util.ArrayList<>();
+        runOnMainSync(() -> collect(main.entryDialog.getWindow().getDecorView(), fields));
+        require(fields.size() == 2 && fields.get(1).getMinLines() == 2, "Token report editor omits duration and supports multiline context");
+        runOnMainSync(() -> main.entryDialog.dismiss());
+        send("DELETE", server + "/api/entries/" + id + "?version=" + entry(id).optInt("version"), token, new JSONObject());
+        runOnMainSync(() -> repo.refresh());
+        await(() -> !repo.busy && entry(id) == null, 20000, "Token fixture cleanup succeeds");
     }
     private void runningEditChecks(Activity activity, String id) throws Exception {
         MainActivity main = (MainActivity) activity;

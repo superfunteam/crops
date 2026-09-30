@@ -19,16 +19,16 @@ Open the app and sign in or create a workspace. Fresh installs connect to **`htt
 
 ## Everyday use
 
-- The menu bar always shows Crops: a paused `0:00` while idle, a filled play indicator and live `h:mm:ss` while running, and a warning indicator when sync needs attention. Hover for the current project and task. Closing the companion window keeps the app running; **Quit Crops** exits explicitly.
-- Click **+ New entry** to choose a project and start a timer. The form opens only after that action; **Back** or Escape returns to the timesheet. A successful start returns to the active timer automatically.
+- The menu bar always shows a rounded dark-green badge: **CROPS** with a leaf while idle, a play indicator and live `h:mm:ss` while running, and a yellow warning when sync needs attention. Hover for the current project and task. Closing the companion window keeps the app running; **Quit Crops** exits explicitly.
+- The compact home starts with the week calendar and your daily entries. Click **+ Start timer** (or **+ New timer** while running) to choose a project. The form opens only after that action; **Back** or Escape returns to the timesheet. A successful start returns to the active timer automatically.
 - Stop from the green timer panel. Stop sends the displayed entry version, so an outdated window cannot stop a newer session resumed elsewhere. Resume a stopped unbilled entry using its play button.
-- Choose **New entry → Manual time** to add time. Enter `1:30` or `1.5` for 90 minutes. Saving returns to that day's entries.
+- Choose **Start timer → Manual time** to add time. Enter `1:30` or `1.5` for 90 minutes. Saving returns to that day's entries.
 - Edit an entry with its pencil button, a double-click, or the right-click menu. The edit form matches New entry: project, task, notes, date, duration (`1:30`, `1.5`, or `1:30:15`, up to one week), and billable. Return saves and Escape goes back; unchanged forms simply close. A running timer can change its project, task, notes, and billable flag; stop it first to change its date or duration.
 - Saves send only the changed fields with the entry version you opened. If the entry changed on another device, the save is refused, the app refetches, loads the latest details into the form, and shows the error banner so you can review and save again. A notice with **Load latest** also appears if a sync brings a newer version while you edit.
 - Invoiced and paid entries show a lock and open read-only with the reason; a team admin can mark them unbilled in the web app.
 - Delete your own stopped, unbilled entries from the right-click menu or the edit form (`⌘⌫`). Both ask for confirmation, and deletes carry the displayed version.
-- Entries with agent-reported usage show a small label such as `2.41M tokens · $31.40`; the edit form also shows the model.
-- Navigate days or weeks below the active timer to review your personal time. Management, team membership, project setup, and invoiced/paid status live in **Open web**.
+- Entries with agent-reported usage show `Agent Usage: 2.41M tokens · $31.40`; the edit form also shows the model. Token-only entries have no clock, Resume action, or duration field. Entries combining human time and agent usage keep both amounts.
+- Navigate days or weeks above the active timer to review your personal time. Management, team membership, project setup, and invoiced/paid status live in **Open web**.
 - Use the team menu to switch workspaces. Your one active timer remains visible across teams.
 - Settings includes account information, sync status, sign out, and Quit. The timer keeps running on the server when the window or app closes.
 - `⌘N` opens a new entry from the timesheet; `⌘R` syncs; `⌘.` stops a timer; `⇧⌘W` opens management. In the edit form, Return saves, Escape goes back, and `⌘⌫` deletes after confirmation. These shortcuts apply while Crops is active.
